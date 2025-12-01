@@ -26,3 +26,88 @@ cargo build --release
 ```bash
 docker build -t binlog-cdc:v3.5.0 .
 ```
+
+# 4. 如何使用
+
+## 4.1 前提条件
+
+1. Kafka 集群已经搭建
+2. mysql 已经具备了 flink cdc 同步需要的用户，以及应该赋予用户的权限
+
+## 4.2 提供配置文件
+
+```yaml
+source:
+  type: mysql
+  hostname: 192.168.1.106
+  port: 3306
+  username: binlog_cdc
+  password: binlog_cdc_123456
+  tables: db.table1,db.table2
+  server-time-zone: Asia/Shanghai
+  server-id: 9529-9530
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.004717
+  scan.startup.specific-offset.pos: 0
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: kafka-1:9092,kafka-2:9092,kafka-3:9092
+  properties.compression.type: lz4
+  topic: binlog-cdc-defaults
+  properties.batch.size: 40000
+  properties.linger.ms: 100
+transform:
+  - source-table: db.table1
+    projection: "'' as hostname,-1 as port,'' as account,'' as password"
+  - source-table: db.table2
+    projection: LOCALTIMESTAMP as update_time
+pipeline:
+  name: sync mysql to kafka
+  parallelism: 1
+```
+
+字段解释:
+
+source 字段解释:
+
+| 字段名                            | 字段值              | 解释                                                                                                   |
+| --------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------ |
+| type                              | mysql               | 数据源类型，指定为 MySQL（Flink CDC 专属 MySQL 连接器，基于 Debezium 解析 binlog）                     |
+| hostname                          | 192.168.1.106       | MySQL 数据库的连接地址（IP 或域名）                                                                    |
+| port                              | 3306                | MySQL 数据库的服务端口（默认值为 3306，需与目标数据库端口一致）                                        |
+| username                          | binlog_cdc          | 连接 MySQL 的用户名，需具备 binlog 读取权限（如 REPLICATION SLAVE、REPLICATION CLIENT 权限）           |
+| password                          | binlog_cdc_123456   | 连接 MySQL 的用户密码                                                                                  |
+| tables                            | db.table1,db.table2 | 需同步的目标表，格式为「库名.表名」，多表之间用逗号分隔                                                |
+| server-time-zone                  | Asia/Shanghai       | 时区配置，需与 MySQL 服务器时区保持一致，避免时间字段同步偏差                                          |
+| server-id                         | 9529-9530           | CDC 客户端的 server-id 范围（MySQL 主从复制机制要求），需避免与其他从库/CDC 客户端冲突，支持多并发读取 |
+| scan.startup.mode                 | specific-offset     | CDC 启动模式，此处为「从指定 binlog 偏移量启动」，适用于补数据、断点续传场景                           |
+| scan.startup.specific-offset.file | mysql-bin.004717    | 启动时指定的 binlog 文件名，即从该文件开始捕获变更数据                                                 |
+| scan.startup.specific-offset.pos  | 0                   | 启动时指定的 binlog 偏移量位置，0 表示从对应 binlog 文件的起始位置开始读取                             |
+
+sink 字段解释:
+
+| 字段名                       | 字段值                                 | 解释                                                                                 |
+| ---------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------ |
+| type                         | kafka                                  | 数据输出目标类型，指定为 Kafka                                                       |
+| name                         | Kafka-Sink                             | Sink 组件名称，用于任务监控、日志标识，便于区分多个输出目标                          |
+| properties.bootstrap.servers | kafka-1:9092,kafka-2:9092,kafka-3:9092 | Kafka 集群的连接地址，多个节点用逗号分隔，格式为「节点标识:端口」                    |
+| properties.compression.type  | lz4                                    | 数据压缩格式，lz4 兼顾压缩比和读写性能，可选值还包括 gzip、snappy、none 等           |
+| topic                        | binlog-cdc-defaults                    | 数据写入的 Kafka Topic 名称（需提前创建，所有同步表的变更数据默认写入该 Topic）      |
+| properties.batch.size        | 40000                                  | Kafka 生产者批量发送阈值，当累计数据量达到 40000 条时触发发送，控制批量粒度          |
+| properties.linger.ms         | 100                                    | 批量发送延迟时间，即使未达到 batch.size，等待 100ms 后也会触发发送，平衡延迟与吞吐量 |
+
+transform 字段解释:
+
+| 字段名       | 字段值                                                                                                                                  | 解释                                                                                                                                                                                                                                                                                                                                     |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| source-table | db.table1 / db.table2                                                                                                                   | 转换规则对应的源表，格式为「库名.表名」，需与 source.tables 中配置的表一致                                                                                                                                                                                                                                                               |
+| projection   | 针对 db.table1：<br>"" as hostname,-1 as port,<br>"" as account,'' as password<br><br>针对 db.table2：<br>LOCALTIMESTAMP as update_time | 字段投影转换规则，用于新增、固定或转换字段（原始表字段会保留，新增字段追加）：<br>1. 字符串常量用 "" 表示，数字常量直接写值，格式为「常量/函数 as 新字段名」；<br>2. db.table1：新增 4 个固定值字段（hostname 为空串、port 为 -1、account 和 password 为空串）；<br>3. db.table2：新增 update_time 字段，值为 Flink 运行时的本地当前时间 |
+
+## 4.3 配置文件保存为 flink-cdc.yaml
+
+## 4.4 启动服务
+
+```bash
+./binlog-cdc --flink-cdc ./flink-cdc.yaml
+```
