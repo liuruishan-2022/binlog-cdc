@@ -15,11 +15,14 @@ pub struct FlinkCdc {
 }
 
 impl FlinkCdc {
+    ///
+    /// 读取配置文件的时候,需要进行一个校验的工作，否则有些参数会填写错误,或者是没有填写
     pub fn read_from(config_path: &str) -> Self {
         let config_file = std::fs::read_to_string(config_path).expect("Unable to read config file");
 
         let config: FlinkCdc = serde_yaml::from_str(&config_file)
             .expect("Unable to parse config file to pub struct FlinkCDC");
+        config.source.validate();
         return config;
     }
 
@@ -94,10 +97,16 @@ pub struct Source {
     tables: String,
     #[serde(rename = "server-id")]
     server_id: String,
+
+    #[serde(rename = "scan.startup.mode")]
+    mode: String,
     #[serde(rename = "scan.startup.specific-offset.file")]
-    binlog_filename: String,
+    binlog_filename: Option<String>,
     #[serde(rename = "scan.startup.specific-offset.pos")]
-    binlog_offset: u32,
+    binlog_offset: Option<u32>,
+
+    #[serde(rename = "scan.startup.timestamp-millis")]
+    timestamp_millis: Option<u32>,
 }
 
 impl Source {
@@ -118,11 +127,20 @@ impl Source {
     }
 
     pub fn binlog_filename(&self) -> &str {
-        return self.binlog_filename.as_str();
+        return self
+            .binlog_filename
+            .as_ref()
+            .expect("error of fetch scan.startup.specific-offset.file");
     }
 
     pub fn binlog_offset(&self) -> u32 {
-        return self.binlog_offset;
+        return self
+            .binlog_offset
+            .expect("error of fetch scan.startup.specific-offset.pos");
+    }
+
+    pub fn timestamp_millis(&self) -> Option<&u32> {
+        return self.timestamp_millis.as_ref();
     }
 
     pub fn tables_include(&self) -> TableInclude {
@@ -148,6 +166,31 @@ impl Source {
         let _ = uri.set_password(Some(self.password()));
 
         return uri.as_str().to_string();
+    }
+
+    ///
+    /// 需要校验，就是如果配置不同的mode,那么就需要对应配置不同的配置信息
+    ///
+    pub fn validate(&self) {
+        match self.mode.as_str() {
+            "specific-offset" => {
+                if self.binlog_filename.is_none() || self.binlog_offset.is_none() {
+                    panic!(
+                        "when scan.startup.mode is specific-offset, must config scan.startup.specific-offset.file and scan.startup.specific-offset.pos"
+                    );
+                }
+            }
+            "timestamp" => {
+                if self.timestamp_millis.is_none() {
+                    panic!(
+                        "when scan.startup.mode is timestamp, must config scan.startup.timestamp-millis"
+                    );
+                }
+            }
+            _ => {
+                panic!("unsupported scan.startup.mode:{}", self.mode.as_str());
+            }
+        }
     }
 }
 
@@ -273,11 +316,7 @@ impl TableInclude {
 #[cfg(test)]
 mod tests {
 
-    use tracing::info;
-
     use crate::LocalTimer;
-
-    use super::*;
 
     fn init() {
         tracing_subscriber::fmt().with_timer(LocalTimer).init();
