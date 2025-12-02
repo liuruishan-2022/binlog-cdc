@@ -19,8 +19,11 @@ impl FlinkCdc {
     /// 读取配置文件的时候,需要进行一个校验的工作，否则有些参数会填写错误,或者是没有填写
     pub fn read_from(config_path: &str) -> Self {
         let config_file = std::fs::read_to_string(config_path).expect("Unable to read config file");
+        return FlinkCdc::from_str(config_file.as_str());
+    }
 
-        let config: FlinkCdc = serde_yaml::from_str(&config_file)
+    pub fn from_str(config: &str) -> Self {
+        let config: FlinkCdc = serde_yaml::from_str(config)
             .expect("Unable to parse config file to pub struct FlinkCDC");
         config.source.validate();
         return config;
@@ -316,9 +319,100 @@ impl TableInclude {
 #[cfg(test)]
 mod tests {
 
-    use crate::LocalTimer;
+    use crate::{LocalTimer, config::cdc::FlinkCdc};
 
     fn init() {
         tracing_subscriber::fmt().with_timer(LocalTimer).init();
+    }
+
+    #[test]
+    fn test_build_config() {
+        init();
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+  scan.startup.specific-offset.pos: 154
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let config = FlinkCdc::from_str(config);
+        assert!(config.source.type_name.as_str() == "mysql");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_build_config_panic() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let _ = FlinkCdc::from_str(config);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_build_config_panic_no_timestamp() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: timestamp
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let _ = FlinkCdc::from_str(config);
     }
 }
