@@ -5,6 +5,7 @@ use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use tracing::info;
+use tracing::warn;
 
 use crate::binlog::Metrics;
 use crate::config::cdc::FlinkCdc;
@@ -76,7 +77,17 @@ impl TableMeta {
             .iter()
             .find(|c| c.is_primary())
             .map(|c| c.column_name().to_string())
-            .expect(format!("{}.{} not have primary key!", db_name, table_name).as_str());
+            .unwrap_or_else(|| {
+                warn!("{}.{} not have primary key!", db_name, table_name);
+                return columns
+                    .iter()
+                    .min_by_key(|col| col.ordinal_position)
+                    .map(|col| col.column_name().to_string())
+                    .expect(
+                        format!("{}.{} no columns to use primary key", db_name, table_name)
+                            .as_str(),
+                    );
+            });
         let columns = columns
             .into_iter()
             .map(|col| (col.ordinal_position, col))
