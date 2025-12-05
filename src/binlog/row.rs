@@ -141,12 +141,12 @@ where
     }
 
     async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
-        //self.kafka_sink.send_batch_messages(debezium).await;
-        self.sink_stream
-            .as_ref()
-            .unwrap()
-            .send_batch_messages(debezium)
-            .await;
+        self.kafka_sink.send_batch_messages(debezium).await;
+        //self.sink_stream
+        //    .as_ref()
+        //    .unwrap()
+        //    .send_batch_messages(debezium)
+        //    .await;
     }
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {
