@@ -72,3 +72,12 @@ impl KafkaSink {
         }
     }
 }
+
+///
+/// 多线程发送给Kafka的实现
+/// 之前发现一个问题:就是解析binlog,然后发送到Kafka的过程是在一个线程中执行的,所以
+/// 导致解析Binlog和发送Kafka相互争抢CPU,从而影响了整体的吞吐量
+///
+/// 为此我们决定使用channel来模拟一个单个生产者,但是多个消费者的模式
+///
+pub struct SpmcKafkaSink {}

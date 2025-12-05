@@ -25,7 +25,12 @@ pub mod transform;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_timer(LocalTimer).init();
+    tracing_subscriber::fmt()
+        .with_timer(LocalTimer)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .init();
     info!("start flink cdc task...");
 
     let args = Args::parse();
