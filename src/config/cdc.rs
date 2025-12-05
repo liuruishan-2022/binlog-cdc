@@ -12,6 +12,7 @@ pub struct FlinkCdc {
     source: Source,
     sink: Sink,
     transform: Option<Vec<Transform>>,
+    pipeline: Pipeline,
 }
 
 impl FlinkCdc {
@@ -84,8 +85,18 @@ impl FlinkCdc {
         self.sink.linger_ms()
     }
 
-    pub fn transorms(&self) -> Option<&Vec<Transform>> {
+    pub fn transforms(&self) -> Option<&Vec<Transform>> {
         self.transform.as_ref()
+    }
+
+    ///
+    /// pipeline属性信息获取
+    pub fn pipeline_name(&self) -> &str {
+        self.pipeline.name()
+    }
+
+    pub fn pipeline_parallelism(&self) -> u32 {
+        self.pipeline.parallelism()
     }
 }
 
@@ -261,6 +272,22 @@ impl Transform {
 
     pub fn projection(&self) -> &str {
         &self.projection
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Pipeline {
+    name: String,
+    parallelism: u32,
+}
+
+impl Pipeline {
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn parallelism(&self) -> u32 {
+        self.parallelism
     }
 }
 
