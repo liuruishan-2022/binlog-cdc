@@ -7,7 +7,7 @@ use tracing::info;
 use crate::{
     binlog::{
         Metrics,
-        row::{self, RowEventHandler},
+        row::RowEventHandler,
         schema::TableMetaHandler,
     },
     config::cdc::FlinkCdc,

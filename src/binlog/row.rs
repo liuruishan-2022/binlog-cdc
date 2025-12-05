@@ -7,7 +7,7 @@ use mysql_binlog_connector_rust::{
         update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
     },
 };
-use serde::{Deserialize, Serialize, de};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tracing::warn;
 
@@ -16,7 +16,7 @@ use crate::{
     config::cdc::FlinkCdc,
     sink::{
         SinkStream,
-        kafka_sink::{KafkaSink, SpmcKafkaSink},
+        kafka_sink::KafkaSink,
     },
     transform::parser::ProjectionHandler,
 };
