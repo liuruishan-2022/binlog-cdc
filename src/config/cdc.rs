@@ -308,9 +308,9 @@ impl TableInclude {
         let includes = includes
             .iter()
             .filter_map(|ele| {
-                let mut parts = ele.splitn(2, '.');
+                let mut parts = ele.rsplitn(2, '.');
                 match (parts.next(), parts.next()) {
-                    (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
+                    (Some(key), Some(value)) => Some((value.to_string(), key.to_string())),
                     _ => None,
                 }
             })
@@ -346,7 +346,10 @@ impl TableInclude {
 #[cfg(test)]
 mod tests {
 
-    use crate::{LocalTimer, config::cdc::FlinkCdc};
+    use crate::{
+        LocalTimer,
+        config::cdc::{FlinkCdc, TableInclude},
+    };
 
     fn init() {
         tracing_subscriber::fmt().with_timer(LocalTimer).init();
@@ -441,5 +444,13 @@ pipeline:
   parallelism: 2
         "#;
         let _ = FlinkCdc::from_str(config);
+    }
+
+    #[test]
+    fn test_table_include() {
+        let includes = "dsap2.2.6.*,app_db.*";
+        let includes = TableInclude::create(includes);
+        assert!(includes.can_include("app_db", "user"));
+        assert!(includes.can_include("dsap2.2.6", "user"));
     }
 }
