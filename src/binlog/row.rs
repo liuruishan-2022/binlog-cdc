@@ -141,6 +141,8 @@ where
     }
 
     async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
+        //TODO 最近在做两种方式的benchmark,暂时保留两种代码
+        //看到是否使用channel好像速度没有多大的区别,并且使用channel可能会造成cpu的浪费.真是奇怪了.
         self.kafka_sink.send_batch_messages(debezium).await;
         //self.sink_stream
         //    .as_ref()
