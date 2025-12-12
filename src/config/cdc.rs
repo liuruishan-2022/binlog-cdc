@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,14 @@ impl FlinkCdc {
 
     pub fn source_table_include(&self) -> TableInclude {
         self.source.tables_include()
+    }
+
+    pub fn source_connect_timeout(&self) -> Duration {
+        self.source.connect_timeout()
+    }
+
+    pub fn source_connect_retry_times(&self) -> u32 {
+        self.source.connect_max_retries()
     }
 
     ///
@@ -121,6 +129,11 @@ pub struct Source {
 
     #[serde(rename = "scan.startup.timestamp-millis")]
     timestamp_millis: Option<u32>,
+
+    #[serde(rename = "connect.max-retries")]
+    connect_max_retries: Option<u32>,
+    #[serde(rename = "connect.timeout")]
+    connect_timeout: Option<Duration>,
 }
 
 impl Source {
@@ -205,6 +218,18 @@ impl Source {
                 panic!("unsupported scan.startup.mode:{}", self.mode.as_str());
             }
         }
+    }
+
+    ///
+    /// 默认是30s,因为网络或者是重启这种,一般恢复很慢,需要一定的时间间隔
+    fn connect_timeout(&self) -> Duration {
+        self.connect_timeout.unwrap_or(Duration::from_secs(30))
+    }
+
+    ///
+    /// 默认是3次
+    fn connect_max_retries(&self) -> u32 {
+        self.connect_max_retries.unwrap_or(3)
     }
 }
 

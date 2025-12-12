@@ -111,8 +111,10 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                     err
                 );
 
-                for index in 1..=3 {
+                for index in 1..=config.source_connect_retry_times() {
                     info!("retry to reconnection mysql times:{}!", index);
+
+                    sleep(config.source_connect_timeout()).await;
                     match client.connect().await {
                         Ok(re_stream) => {
                             info!("reconnection mysql success!");
@@ -121,7 +123,6 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                         }
                         Err(err) => {
                             warn!("reconnection mysql failed, error:{:?}!", err);
-                            sleep(Duration::from_secs(index * 3)).await;
                         }
                     }
                 }
