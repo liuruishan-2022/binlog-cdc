@@ -1,4 +1,3 @@
-
 use base64::{Engine, engine::general_purpose};
 use chrono::{Local, TimeZone, offset::LocalResult};
 use mysql_binlog_connector_rust::{
@@ -15,7 +14,7 @@ use tracing::warn;
 use crate::{
     binlog::{Metrics, schema::TableMeta},
     config::cdc::FlinkCdc,
-    sink::kafka_sink::KafkaSink,
+    sink::{SinkStream, kafka_sink::KafkaSink},
     transform::parser::ProjectionHandler,
 };
 
@@ -23,18 +22,36 @@ use crate::{
 /// 处理Row相关类型的事件的
 ///
 
-pub struct RowEventHandler<'a> {
+pub struct RowEventHandler<'a, T>
+where
+    T: SinkStream,
+{
     kafka_sink: KafkaSink,
     metrics: &'a Metrics,
     projection: ProjectionHandler,
+    sink_stream: Option<T>,
 }
 
-impl<'a> RowEventHandler<'a> {
+impl<'a, T> RowEventHandler<'a, T>
+where
+    T: SinkStream,
+{
+    ///Depreacated 这块代码逻辑废弃使用,请使用下面的build方法,目前暂时对T的范型的理解不是很清楚
     pub fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
         RowEventHandler {
             kafka_sink: KafkaSink::build(config),
             metrics: metrics,
-            projection: ProjectionHandler::create(config.transorms()),
+            projection: ProjectionHandler::create(config.transforms()),
+            sink_stream: None,
+        }
+    }
+
+    pub fn build(config: &'a FlinkCdc, metrics: &'a Metrics, sink_stream: T) -> Self {
+        RowEventHandler {
+            kafka_sink: KafkaSink::build(config),
+            metrics: metrics,
+            projection: ProjectionHandler::create(config.transforms()),
+            sink_stream: Some(sink_stream),
         }
     }
 
@@ -124,7 +141,14 @@ impl<'a> RowEventHandler<'a> {
     }
 
     async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
+        //TODO 最近在做两种方式的benchmark,暂时保留两种代码
+        //看到是否使用channel好像速度没有多大的区别,并且使用channel可能会造成cpu的浪费.真是奇怪了.
         self.kafka_sink.send_batch_messages(debezium).await;
+        //self.sink_stream
+        //    .as_ref()
+        //    .unwrap()
+        //    .send_batch_messages(debezium)
+        //    .await;
     }
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {

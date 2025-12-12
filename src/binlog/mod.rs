@@ -1,13 +1,15 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use mysql_binlog_connector_rust::{binlog_client::BinlogClient, event::event_data::EventData};
+use mysql_binlog_connector_rust::{
+    binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
+};
 use prometheus_client::{
     encoding::EncodeLabelSet,
     metrics::{counter::Counter, family::Family},
     registry::Registry,
 };
-use tokio::sync::Mutex;
-use tracing::info;
+use tokio::{sync::Mutex, time::sleep};
+use tracing::{info, warn};
 
 use crate::{
     config::cdc::FlinkCdc,
@@ -46,59 +48,87 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
         .expect("connect to mysql read binlog file error!");
 
     loop {
-        let (header, data) = stream.read().await.expect("read mysql binlog error!");
-        match data {
-            EventData::Rotate(event) => {
-                info!("read new binlog:{}", event.binlog_filename);
-                event_handler.handle_rotate_event(&event);
-                savepoint.save(&event.binlog_filename);
-                metrics.inc_flink_mysql_cdc("rotate");
+        let result = stream.read().await;
+        match result {
+            Ok((_header, data)) => match data {
+                EventData::Rotate(event) => {
+                    info!("read new binlog:{}", event.binlog_filename);
+                    event_handler.handle_rotate_event(&event);
+                    savepoint.save(&event.binlog_filename);
+                    metrics.inc_flink_mysql_cdc("rotate");
+                }
+                EventData::TableMap(event) => {
+                    event_handler.handle_table_map_event(&event).await;
+                    metrics.inc_flink_mysql_cdc("table-map");
+                }
+                EventData::WriteRows(event) => {
+                    event_handler.handle_write_rows_event(event).await;
+                    metrics.inc_flink_mysql_cdc("write-rows");
+                }
+                EventData::DeleteRows(event) => {
+                    event_handler.handle_delete_rows_event(event).await;
+                    metrics.inc_flink_mysql_cdc("delete-rows");
+                }
+                EventData::UpdateRows(event) => {
+                    event_handler.handle_update_rows_event(event).await;
+                    metrics.inc_flink_mysql_cdc("update-rows");
+                }
+                EventData::NotSupported => {
+                    metrics.inc_flink_mysql_cdc("not-supported");
+                }
+                EventData::FormatDescription(_event) => {
+                    metrics.inc_flink_mysql_cdc("format-description");
+                }
+                EventData::PreviousGtids(_event) => {
+                    metrics.inc_flink_mysql_cdc("previous-gtids");
+                }
+                EventData::Gtid(_event) => {
+                    metrics.inc_flink_mysql_cdc("gtid");
+                }
+                EventData::Query(_event) => {
+                    metrics.inc_flink_mysql_cdc("query");
+                }
+                EventData::Xid(_event) => {
+                    metrics.inc_flink_mysql_cdc("xid");
+                }
+                EventData::XaPrepare(_event) => {
+                    metrics.inc_flink_mysql_cdc("xa-prepare");
+                }
+                EventData::TransactionPayload(_event) => {
+                    metrics.inc_flink_mysql_cdc("transaction-payload");
+                }
+                EventData::RowsQuery(_event) => {
+                    metrics.inc_flink_mysql_cdc("rows-query");
+                }
+                EventData::HeartBeat => {
+                    metrics.inc_flink_mysql_cdc("heart-beat");
+                }
+            },
+            Err(BinlogError::IoError(err)) => {
+                //在Mysql重启的时候,无法做到重新连接的操作
+                warn!(
+                    "read binlog error:{:?} we will retry 3 times to reconnection!",
+                    err
+                );
+
+                for index in 1..=config.source_connect_retry_times() {
+                    info!("retry to reconnection mysql times:{}!", index);
+
+                    sleep(config.source_connect_timeout()).await;
+                    match client.connect().await {
+                        Ok(re_stream) => {
+                            info!("reconnection mysql success!");
+                            stream = re_stream;
+                            break;
+                        }
+                        Err(err) => {
+                            warn!("reconnection mysql failed, error:{:?}!", err);
+                        }
+                    }
+                }
             }
-            EventData::TableMap(event) => {
-                event_handler.handle_table_map_event(&event).await;
-                metrics.inc_flink_mysql_cdc("table-map");
-            }
-            EventData::WriteRows(event) => {
-                event_handler.handle_write_rows_event(event).await;
-                metrics.inc_flink_mysql_cdc("write-rows");
-            }
-            EventData::DeleteRows(event) => {
-                event_handler.handle_delete_rows_event(event).await;
-                metrics.inc_flink_mysql_cdc("delete-rows");
-            }
-            EventData::UpdateRows(event) => {
-                event_handler.handle_update_rows_event(event).await;
-                metrics.inc_flink_mysql_cdc("update-rows");
-            }
-            EventData::NotSupported => {
-                metrics.inc_flink_mysql_cdc("not-supported");
-            }
-            EventData::FormatDescription(event) => {
-                metrics.inc_flink_mysql_cdc("format-description");
-            }
-            EventData::PreviousGtids(event) => {
-                metrics.inc_flink_mysql_cdc("previous-gtids");
-            }
-            EventData::Gtid(event) => {
-                metrics.inc_flink_mysql_cdc("gtid");
-            }
-            EventData::Query(event) => {
-                metrics.inc_flink_mysql_cdc("query");
-            }
-            EventData::Xid(event) => {
-                metrics.inc_flink_mysql_cdc("xid");
-            }
-            EventData::XaPrepare(event) => {
-                metrics.inc_flink_mysql_cdc("xa-prepare");
-            }
-            EventData::TransactionPayload(event) => {
-                metrics.inc_flink_mysql_cdc("transaction-payload");
-            }
-            EventData::RowsQuery(event) => {
-                metrics.inc_flink_mysql_cdc("rows-query");
-            }
-            EventData::HeartBeat => {
-                metrics.inc_flink_mysql_cdc("heart-beat");
+            Err(err) => {
+                panic!("read mysql binlog error:{:?}", err);
             }
         }
     }

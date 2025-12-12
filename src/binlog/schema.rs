@@ -2,9 +2,11 @@ use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
+use sqlparser::ast::helpers::key_value_options;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use tracing::info;
+use tracing::warn;
 
 use crate::binlog::Metrics;
 use crate::config::cdc::FlinkCdc;
@@ -35,10 +37,9 @@ impl TableSchema {
         let mut columns = vec![];
         while let Some(row) = rows.try_next().await.unwrap() {
             let field: &str = row.try_get("Field").expect("fetch desc table field error!");
-            let key = match row.try_get("Key").expect("fetch desc table Key error!") {
-                "PRI" => true,
-                _ => false,
-            };
+            let key: Result<Vec<u8>, sqlx::Error> = row.try_get("Key");
+            let key = Self::judge_primary_key(key);
+
             columns.push(ColumnMeta {
                 ordinal_position: source_position,
                 column_name: field.to_string(),
@@ -53,6 +54,22 @@ impl TableSchema {
             table_name.to_string(),
             columns,
         );
+    }
+
+    fn judge_primary_key(key: Result<Vec<u8>, sqlx::Error>) -> bool {
+        match key {
+            Ok(key) => match String::from_utf8(key) {
+                Ok(key) => key == "PRI",
+                Err(err) => {
+                    warn!("can not convert to utf8:{:?}!", err);
+                    false
+                }
+            },
+            Err(err) => {
+                warn!("error:{:?}", err);
+                false
+            }
+        }
     }
 }
 
@@ -76,7 +93,17 @@ impl TableMeta {
             .iter()
             .find(|c| c.is_primary())
             .map(|c| c.column_name().to_string())
-            .expect(format!("{}.{} not have primary key!", db_name, table_name).as_str());
+            .unwrap_or_else(|| {
+                warn!("{}.{} not have primary key!", db_name, table_name);
+                return columns
+                    .iter()
+                    .min_by_key(|col| col.ordinal_position)
+                    .map(|col| col.column_name().to_string())
+                    .expect(
+                        format!("{}.{} no columns to use primary key", db_name, table_name)
+                            .as_str(),
+                    );
+            });
         let columns = columns
             .into_iter()
             .map(|col| (col.ordinal_position, col))
@@ -191,15 +218,5 @@ impl<'a> TableMetaHandler<'a> {
 
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {
         self.cache.get(&table_id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::LocalTimer;
-
-    fn init() {
-        tracing_subscriber::fmt().with_timer(LocalTimer).init();
     }
 }

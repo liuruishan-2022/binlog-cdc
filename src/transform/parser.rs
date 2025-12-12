@@ -93,7 +93,7 @@ impl StatementParser {
                 .iter()
                 .for_each(|item| match item {
                     SelectItem::UnnamedExpr(expr) => match expr {
-                        Expr::Identifier(ident) => {
+                        Expr::Identifier(_ident) => {
                             info!("常量");
                         }
                         _ => {
@@ -125,7 +125,7 @@ impl StatementParser {
                             SqlValue::SingleQuotedString(value) => {
                                 source.insert(alias.value.to_string(), json!(value));
                             }
-                            SqlValue::Number(number, flag) => {
+                            SqlValue::Number(number, _flag) => {
                                 let number = number.parse::<i64>().unwrap();
                                 source.insert(alias.value.to_string(), json!(number));
                             }
@@ -138,7 +138,7 @@ impl StatementParser {
                         },
                         Expr::UnaryOp { op, expr } => match &**expr {
                             Expr::Value(value) => match &value.value {
-                                SqlValue::Number(number, flag) => match op {
+                                SqlValue::Number(number, _flag) => match op {
                                     UnaryOperator::Minus => {
                                         let number = number.parse::<i64>().unwrap();
                                         source.insert(alias.value.to_string(), json!(-1 * number));

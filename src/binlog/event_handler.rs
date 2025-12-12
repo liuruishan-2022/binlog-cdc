@@ -5,8 +5,13 @@ use mysql_binlog_connector_rust::event::{
 use tracing::info;
 
 use crate::{
-    binlog::{Metrics, row::RowEventHandler, schema::TableMetaHandler},
+    binlog::{
+        Metrics,
+        row::RowEventHandler,
+        schema::TableMetaHandler,
+    },
     config::cdc::FlinkCdc,
+    sink::kafka_sink::SpmcKafkaSink,
 };
 
 ///
@@ -14,15 +19,17 @@ use crate::{
 /// 从线下的CDC的事件的类型分析，发现TABLE_MAP_EVENT事件大概占据所有事件的:50%的样子，所以如果每次都去请求表的结构，那么速度会非常的慢速
 pub struct EventHandler<'a> {
     table_map_event_handler: TableMetaHandler<'a>,
-    row_event_handler: RowEventHandler<'a>,
+    row_event_handler: RowEventHandler<'a, SpmcKafkaSink>,
 }
 
 impl<'a> EventHandler<'a> {
     pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
+        let sink_stream = SpmcKafkaSink::build(config);
         let table_map_event_handler = TableMetaHandler::new(config, metrics).await;
+        let row_event_handler = RowEventHandler::build(config, metrics, sink_stream);
         EventHandler {
             table_map_event_handler: table_map_event_handler,
-            row_event_handler: RowEventHandler::new(config, metrics),
+            row_event_handler: row_event_handler,
         }
     }
 

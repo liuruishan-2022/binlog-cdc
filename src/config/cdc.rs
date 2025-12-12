@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -12,14 +12,21 @@ pub struct FlinkCdc {
     source: Source,
     sink: Sink,
     transform: Option<Vec<Transform>>,
+    pipeline: Pipeline,
 }
 
 impl FlinkCdc {
+    ///
+    /// 读取配置文件的时候,需要进行一个校验的工作，否则有些参数会填写错误,或者是没有填写
     pub fn read_from(config_path: &str) -> Self {
         let config_file = std::fs::read_to_string(config_path).expect("Unable to read config file");
+        return FlinkCdc::from_str(config_file.as_str());
+    }
 
-        let config: FlinkCdc = serde_yaml::from_str(&config_file)
+    pub fn from_str(config: &str) -> Self {
+        let config: FlinkCdc = serde_yaml::from_str(config)
             .expect("Unable to parse config file to pub struct FlinkCDC");
+        config.source.validate();
         return config;
     }
 
@@ -51,6 +58,14 @@ impl FlinkCdc {
         self.source.tables_include()
     }
 
+    pub fn source_connect_timeout(&self) -> Duration {
+        self.source.connect_timeout()
+    }
+
+    pub fn source_connect_retry_times(&self) -> u32 {
+        self.source.connect_max_retries()
+    }
+
     ///
     /// 获取sink相关的信息配置
     ///
@@ -78,8 +93,18 @@ impl FlinkCdc {
         self.sink.linger_ms()
     }
 
-    pub fn transorms(&self) -> Option<&Vec<Transform>> {
+    pub fn transforms(&self) -> Option<&Vec<Transform>> {
         self.transform.as_ref()
+    }
+
+    ///
+    /// pipeline属性信息获取
+    pub fn pipeline_name(&self) -> &str {
+        self.pipeline.name()
+    }
+
+    pub fn pipeline_parallelism(&self) -> u32 {
+        self.pipeline.parallelism()
     }
 }
 
@@ -94,10 +119,21 @@ pub struct Source {
     tables: String,
     #[serde(rename = "server-id")]
     server_id: String,
+
+    #[serde(rename = "scan.startup.mode")]
+    mode: String,
     #[serde(rename = "scan.startup.specific-offset.file")]
-    binlog_filename: String,
+    binlog_filename: Option<String>,
     #[serde(rename = "scan.startup.specific-offset.pos")]
-    binlog_offset: u32,
+    binlog_offset: Option<u32>,
+
+    #[serde(rename = "scan.startup.timestamp-millis")]
+    timestamp_millis: Option<u32>,
+
+    #[serde(rename = "connect.max-retries")]
+    connect_max_retries: Option<u32>,
+    #[serde(rename = "connect.timeout")]
+    connect_timeout: Option<Duration>,
 }
 
 impl Source {
@@ -118,11 +154,20 @@ impl Source {
     }
 
     pub fn binlog_filename(&self) -> &str {
-        return self.binlog_filename.as_str();
+        return self
+            .binlog_filename
+            .as_ref()
+            .expect("error of fetch scan.startup.specific-offset.file");
     }
 
     pub fn binlog_offset(&self) -> u32 {
-        return self.binlog_offset;
+        return self
+            .binlog_offset
+            .expect("error of fetch scan.startup.specific-offset.pos");
+    }
+
+    pub fn timestamp_millis(&self) -> Option<&u32> {
+        return self.timestamp_millis.as_ref();
     }
 
     pub fn tables_include(&self) -> TableInclude {
@@ -148,6 +193,43 @@ impl Source {
         let _ = uri.set_password(Some(self.password()));
 
         return uri.as_str().to_string();
+    }
+
+    ///
+    /// 需要校验，就是如果配置不同的mode,那么就需要对应配置不同的配置信息
+    ///
+    pub fn validate(&self) {
+        match self.mode.as_str() {
+            "specific-offset" => {
+                if self.binlog_filename.is_none() || self.binlog_offset.is_none() {
+                    panic!(
+                        "when scan.startup.mode is specific-offset, must config scan.startup.specific-offset.file and scan.startup.specific-offset.pos"
+                    );
+                }
+            }
+            "timestamp" => {
+                if self.timestamp_millis.is_none() {
+                    panic!(
+                        "when scan.startup.mode is timestamp, must config scan.startup.timestamp-millis"
+                    );
+                }
+            }
+            _ => {
+                panic!("unsupported scan.startup.mode:{}", self.mode.as_str());
+            }
+        }
+    }
+
+    ///
+    /// 默认是30s,因为网络或者是重启这种,一般恢复很慢,需要一定的时间间隔
+    fn connect_timeout(&self) -> Duration {
+        self.connect_timeout.unwrap_or(Duration::from_secs(30))
+    }
+
+    ///
+    /// 默认是3次
+    fn connect_max_retries(&self) -> u32 {
+        self.connect_max_retries.unwrap_or(3)
     }
 }
 
@@ -218,6 +300,22 @@ impl Transform {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Pipeline {
+    name: String,
+    parallelism: u32,
+}
+
+impl Pipeline {
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn parallelism(&self) -> u32 {
+        self.parallelism
+    }
+}
+
 ///
 /// 下面不是属于flink cdc规范对应的struct了
 #[derive(Debug)]
@@ -235,9 +333,9 @@ impl TableInclude {
         let includes = includes
             .iter()
             .filter_map(|ele| {
-                let mut parts = ele.splitn(2, '.');
+                let mut parts = ele.rsplitn(2, '.');
                 match (parts.next(), parts.next()) {
-                    (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
+                    (Some(key), Some(value)) => Some((value.to_string(), key.to_string())),
                     _ => None,
                 }
             })
@@ -273,13 +371,112 @@ impl TableInclude {
 #[cfg(test)]
 mod tests {
 
-    use tracing::info;
-
-    use crate::LocalTimer;
-
-    use super::*;
+    use crate::{
+        LocalTimer,
+        config::cdc::{FlinkCdc, TableInclude},
+    };
 
     fn init() {
         tracing_subscriber::fmt().with_timer(LocalTimer).init();
+    }
+
+    #[test]
+    fn test_build_config() {
+        init();
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+  scan.startup.specific-offset.pos: 154
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let config = FlinkCdc::from_str(config);
+        assert!(config.source.type_name.as_str() == "mysql");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_build_config_panic() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let _ = FlinkCdc::from_str(config);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_build_config_panic_no_timestamp() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: timestamp
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let _ = FlinkCdc::from_str(config);
+    }
+
+    #[test]
+    fn test_table_include() {
+        let includes = "
+information_schema.*,cpaas_mos.*,dify-test.*,dsap2.2.6.*,federated_link.*,hw2-msmp.*,mos2_gsms.*,mos6.2.1_list.*,mos_nacos1.4.*,mostest_gsms.*,mosxn_gsms.*,mosxn_list.*,mysql.*,nacos_sync.*,performance_schema.*,simulate.*,slow_query_log.*,srcp.*,stc.*,sys.*,temp_db.*,tmt_atest_cpaas.*,tmt_atest_mosgsms.*,tmt_atest_moslist.*,tmt_atest_nacos.*,tmt_atest_xxl_job.*,tmt_simulate.*,xxl_job_mos.*,xxl_job_xn.*,zhang.*,zxy_sms.*";
+        let includes = TableInclude::create(includes);
+        assert!(includes.can_include("app_db", "user"));
+        assert!(includes.can_include("dsap2.2.6", "user"));
     }
 }
