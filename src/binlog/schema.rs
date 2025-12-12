@@ -36,6 +36,7 @@ impl TableSchema {
         let mut columns = vec![];
         while let Some(row) = rows.try_next().await.unwrap() {
             let field: &str = row.try_get("Field").expect("fetch desc table field error!");
+            info!("查看列名字:{}!", field);
             let key = match row.try_get("Key").expect("fetch desc table Key error!") {
                 "PRI" => true,
                 _ => false,
@@ -202,15 +203,5 @@ impl<'a> TableMetaHandler<'a> {
 
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {
         self.cache.get(&table_id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::LocalTimer;
-
-    fn init() {
-        tracing_subscriber::fmt().with_timer(LocalTimer).init();
     }
 }

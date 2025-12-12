@@ -46,7 +46,8 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
         .expect("connect to mysql read binlog file error!");
 
     loop {
-        let (header, data) = stream.read().await.expect("read mysql binlog error!");
+        // 当Mysql出现重启的时候,这个地方会报错,断掉,需要支持重连的动作
+        let (_header, data) = stream.read().await.expect("read mysql binlog error!");
         match data {
             EventData::Rotate(event) => {
                 info!("read new binlog:{}", event.binlog_filename);
@@ -73,28 +74,28 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
             EventData::NotSupported => {
                 metrics.inc_flink_mysql_cdc("not-supported");
             }
-            EventData::FormatDescription(event) => {
+            EventData::FormatDescription(_event) => {
                 metrics.inc_flink_mysql_cdc("format-description");
             }
-            EventData::PreviousGtids(event) => {
+            EventData::PreviousGtids(_event) => {
                 metrics.inc_flink_mysql_cdc("previous-gtids");
             }
-            EventData::Gtid(event) => {
+            EventData::Gtid(_event) => {
                 metrics.inc_flink_mysql_cdc("gtid");
             }
-            EventData::Query(event) => {
+            EventData::Query(_event) => {
                 metrics.inc_flink_mysql_cdc("query");
             }
-            EventData::Xid(event) => {
+            EventData::Xid(_event) => {
                 metrics.inc_flink_mysql_cdc("xid");
             }
-            EventData::XaPrepare(event) => {
+            EventData::XaPrepare(_event) => {
                 metrics.inc_flink_mysql_cdc("xa-prepare");
             }
-            EventData::TransactionPayload(event) => {
+            EventData::TransactionPayload(_event) => {
                 metrics.inc_flink_mysql_cdc("transaction-payload");
             }
-            EventData::RowsQuery(event) => {
+            EventData::RowsQuery(_event) => {
                 metrics.inc_flink_mysql_cdc("rows-query");
             }
             EventData::HeartBeat => {

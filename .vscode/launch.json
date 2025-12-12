@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug binlog-cdc",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/binlog-cdc",
+            "args": [
+                "--flink-cdc",
+                "./config.yaml"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build"
+        }
+    ]
+}
