@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
+use sqlparser::ast::helpers::key_value_options;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use tracing::info;
@@ -36,11 +37,9 @@ impl TableSchema {
         let mut columns = vec![];
         while let Some(row) = rows.try_next().await.unwrap() {
             let field: &str = row.try_get("Field").expect("fetch desc table field error!");
-            info!("查看列名字:{}!", field);
-            let key = match row.try_get("Key").expect("fetch desc table Key error!") {
-                "PRI" => true,
-                _ => false,
-            };
+            let key: Result<Vec<u8>, sqlx::Error> = row.try_get("Key");
+            let key = Self::judge_primary_key(key);
+
             columns.push(ColumnMeta {
                 ordinal_position: source_position,
                 column_name: field.to_string(),
@@ -55,6 +54,22 @@ impl TableSchema {
             table_name.to_string(),
             columns,
         );
+    }
+
+    fn judge_primary_key(key: Result<Vec<u8>, sqlx::Error>) -> bool {
+        match key {
+            Ok(key) => match String::from_utf8(key) {
+                Ok(key) => key == "PRI",
+                Err(err) => {
+                    warn!("can not convert to utf8:{:?}!", err);
+                    false
+                }
+            },
+            Err(err) => {
+                warn!("error:{:?}", err);
+                false
+            }
+        }
     }
 }
 

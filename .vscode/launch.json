@@ -8,10 +8,18 @@
             "program": "${workspaceFolder}/target/debug/binlog-cdc",
             "args": [
                 "--flink-cdc",
-                "./config.yaml"
+                "${workspaceFolder}/config-5.7.10.yaml"
             ],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "cargo build"
+            "sourceLanguages": [
+                "rust"
+            ],
+            "preLaunchTask": "cargo build",
+            "env": {
+                "RUST_LOG": "debug",
+                "RUST_BACKTRACE": "1"
+            },
+            "console": "integratedTerminal"
         }
     ]
 }
