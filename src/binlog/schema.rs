@@ -30,7 +30,7 @@ impl TableSchema {
     }
 
     pub async fn desc_table(&self, table_id: u64, db_name: &str, table_name: &str) -> TableMeta {
-        let sql = format!("desc {}.{}", db_name, table_name);
+        let sql = format!("desc `{}`.{}", db_name, table_name);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
 
         let mut source_position = 1;
