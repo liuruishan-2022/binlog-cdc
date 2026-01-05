@@ -12,6 +12,7 @@ pub struct FlinkCdc {
     source: Source,
     sink: Sink,
     transform: Option<Vec<Transform>>,
+    route: Option<Vec<Route>>,
     pipeline: Pipeline,
 }
 
@@ -298,6 +299,16 @@ impl Transform {
     pub fn projection(&self) -> &str {
         &self.projection
     }
+}
+
+///
+/// 增加route的路由的配置
+///
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Route {
+    source: String,
+    sink: String,
+    description: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]

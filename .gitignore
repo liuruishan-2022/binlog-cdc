@@ -2,3 +2,5 @@ target/
 build.sh
 savepoints/
 test-config.yaml
+kafka-to-mysql.yaml
+config.yaml
