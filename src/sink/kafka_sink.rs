@@ -79,7 +79,7 @@ impl KafkaSink {
 }
 
 impl SinkStream for KafkaSink {
-    async fn send_batch_messages(&self, messages: Vec<DebeziumFormat>) {
+    async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
         self.send_batch_messages(messages).await;
     }
 }
@@ -148,7 +148,7 @@ impl SpmcKafkaSink {
 }
 
 impl SinkStream for SpmcKafkaSink {
-    async fn send_batch_messages(&self, messages: Vec<DebeziumFormat>) {
+    async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
         let mut hasher = DefaultHasher::new();
         for msg in messages {
             msg.keys().hash(&mut hasher);

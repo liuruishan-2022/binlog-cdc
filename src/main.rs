@@ -21,6 +21,7 @@ pub mod binlog;
 pub mod config;
 pub mod savepoint;
 pub mod sink;
+pub mod source;
 pub mod transform;
 
 #[tokio::main]
