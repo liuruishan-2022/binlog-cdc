@@ -1,6 +1,6 @@
-use futures::FutureExt;
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
+use serde_json::Value;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use tracing::info;
@@ -41,7 +41,91 @@ impl MysqlSink {
         self.desc_table(table).await
     }
 
-    pub async fn desc_table(&self, table: &str) -> TableMeta {
+    ///
+    /// 现在陷入了一个难题,是如何获取到topic的名称,因为需要根据topic来决定使用哪个表
+    pub async fn delete(&self, debezium: &DebeziumFormat, topic: &str) {
+        let meta = self.table_info(topic).await;
+        let where_sql = meta
+            .primary_keys()
+            .iter()
+            .map(|ele| {
+                let data = debezium
+                    .before_column(ele)
+                    .expect("fetch column data error")
+                    .to_string();
+                format!("{} = '{}'", ele, data)
+            })
+            .collect::<Vec<String>>()
+            .join(" AND ");
+        let sql = format!("DELETE FROM {} WHERE {}", meta.table(), where_sql);
+        info!("执行mysql的删除操作:{}", sql);
+    }
+
+    pub async fn insert_data(&self, debezium: &DebeziumFormat, topic: &str) {
+        let meta = self.table_info(topic).await;
+        let columns = meta
+            .columns
+            .iter()
+            .map(|ele| ele.column_name().to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+        let values = meta
+            .columns
+            .iter()
+            .map(|ele| {
+                let data = debezium
+                    .after_column(ele.column_name())
+                    .expect("fetch column data error")
+                    .to_string();
+                format!("'{}'", data)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+        let sql = format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            meta.table(),
+            columns,
+            values
+        );
+        info!("执行mysql的插入操作:{}", sql);
+    }
+
+    pub async fn update_data(&self, debezium: &DebeziumFormat, topic: &str) {
+        let meta = self.table_info(topic).await;
+        let set_sql = meta
+            .columns
+            .iter()
+            .map(|ele| {
+                let data = debezium
+                    .after_column(ele.column_name())
+                    .expect("fetch column data error")
+                    .to_string();
+                format!("{} = '{}'", ele.column_name(), data)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+        let where_sql = meta
+            .primary_keys()
+            .iter()
+            .map(|ele| {
+                let data = debezium
+                    .before_column(ele)
+                    .expect("fetch column data error")
+                    .to_string();
+                format!("{} = '{}'", ele, data)
+            })
+            .collect::<Vec<String>>()
+            .join(" AND ");
+        let sql = format!(
+            "UPDATE {} SET {} WHERE {}",
+            meta.table(),
+            set_sql,
+            where_sql
+        );
+        info!("执行mysql的更新操作:{}", sql);
+    }
+
+    async fn desc_table(&self, table: &str) -> TableMeta {
         let sql = format!("desc {}", table);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
 
@@ -77,21 +161,22 @@ impl MysqlSink {
 }
 
 impl SinkStream for MysqlSink {
-    async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
-        for debezium in messages {
-            match debezium.op() {
-                "d" => {
-                    info!("执行删除的动作");
-                }
-                "c" => {
-                    info!("执行create动作");
-                }
-                "u" => {
-                    info!("执行更新的动作");
-                }
-                _ => {
-                    warn!("未知的操作类型:{}", debezium.op());
-                }
+    async fn process(&self, debezium: &DebeziumFormat, topic: &str) {
+        match debezium.op() {
+            "d" => {
+                info!("执行删除的动作");
+                self.delete(debezium, topic).await;
+            }
+            "c" => {
+                info!("执行create动作");
+                self.insert_data(debezium, topic).await;
+            }
+            "u" => {
+                info!("执行更新的动作");
+                self.update_data(debezium, topic).await;
+            }
+            _ => {
+                warn!("未知的操作类型:{}", debezium.op());
             }
         }
     }
@@ -119,5 +204,13 @@ impl TableMeta {
             columns,
             primary_keys: keys,
         }
+    }
+
+    pub fn primary_keys(&self) -> &Vec<String> {
+        &self.primary_keys
+    }
+
+    pub fn table(&self) -> &str {
+        self.table.as_str()
     }
 }

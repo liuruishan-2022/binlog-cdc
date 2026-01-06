@@ -19,6 +19,7 @@ use clap::Parser;
 pub mod args;
 pub mod binlog;
 pub mod config;
+pub mod pipeline;
 pub mod savepoint;
 pub mod sink;
 pub mod source;
@@ -42,8 +43,10 @@ async fn main() {
     let registry_binlog = registry.clone();
 
     tokio::spawn(async move {
+        //临时屏蔽掉binlog的代码,测试下从Kafka消费数据写入到Mysql的功能
         let config = FlinkCdc::read_from(&flink_cdc_path);
-        binlog::dump_and_parse(registry_binlog, &config).await;
+        //binlog::dump_and_parse(registry_binlog, &config).await;
+        pipeline::start_pipeline().await;
     });
 
     let registry_metrics = registry.clone();

@@ -255,7 +255,7 @@ where
 ///
 /// Debezium的JSON格式的数据结构对象
 ///
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Deserialize)]
 pub struct DebeziumFormat {
     before: Option<Value>,
     after: Option<Value>,
@@ -317,6 +317,20 @@ impl DebeziumFormat {
     pub fn op(&self) -> &str {
         self.op.as_str()
     }
+
+    pub fn before_column(&self, column_name: &str) -> Option<&Value> {
+        if let Some(before) = &self.before {
+            return before.get(column_name);
+        }
+        return None;
+    }
+
+    pub fn after_column(&self, column_name: &str) -> Option<&Value> {
+        if let Some(after) = &self.after {
+            return after.get(column_name);
+        }
+        return None;
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -325,7 +339,7 @@ pub(crate) struct DebeziumSource {
     table: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct MessageKey {
     keys: Map<String, Value>,
 }

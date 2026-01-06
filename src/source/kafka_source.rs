@@ -1,5 +1,66 @@
+use futures_util::TryStreamExt;
+use rdkafka::{
+    ClientConfig, Message,
+    consumer::{Consumer, StreamConsumer},
+    error::KafkaError,
+};
+use tracing::{info, warn};
+
+use crate::{binlog::row::DebeziumFormat, sink::SinkStream};
+
 ///
 /// 放置Kafka作为数据源的处理代码
 ///
 
-pub struct KafkaSource {}
+pub struct KafkaSource<T>
+where
+    T: SinkStream,
+{
+    sink: T,
+}
+
+impl<T> KafkaSource<T>
+where
+    T: SinkStream,
+{
+    const BOOTSTRAP_SERVERS: &str = "bootstrap.servers";
+    const GROUP_ID: &str = "group.id";
+    const AUTO_OFFSET_RESET: &str = "auto.offset.reset";
+    const EARLIEST: &str = "earliest";
+    const MESSAGE_TIMEOUT_MS: &str = "message.timeout.ms";
+    const SESSION_TIMEOUT_MS: &str = "session.timeout.ms";
+    const BATCH_SIZE: &str = "batch.size";
+    const COMPRESSION_TYPE: &str = "compression.type";
+    const HEARTBEAT_INTERVAL_MS: &str = "heartbeat.interval.ms";
+    const LINKGER_MS: &str = "linger.ms";
+
+    pub fn new(sink: T) -> Self {
+        KafkaSource { sink }
+    }
+
+    pub async fn start(&self) {
+        let consumer = self.build_consumer().expect("build consumer error!");
+        let stream = consumer.stream().try_for_each(|message| async move {
+            info!("消费到消息内容");
+
+            let debezium =
+                serde_json::from_slice::<DebeziumFormat>(&message.payload().unwrap()).unwrap();
+            self.sink.process(&debezium, message.topic()).await;
+            Ok(())
+        });
+        stream.await.expect("stream kafka message error!");
+        warn!("kafka source stop!");
+    }
+
+    fn build_consumer(&self) -> Result<StreamConsumer, KafkaError> {
+        let consumer = ClientConfig::new()
+            .set(Self::BOOTSTRAP_SERVERS, "172.16.1.118:9092")
+            .set(Self::GROUP_ID, "kafka-to-mysql-cg-20260106")
+            .set(Self::AUTO_OFFSET_RESET, Self::EARLIEST)
+            .set(Self::HEARTBEAT_INTERVAL_MS, "3000")
+            .set(Self::SESSION_TIMEOUT_MS, "45000")
+            .create::<StreamConsumer>()?;
+        consumer.subscribe(&["dev-kafka-gsms-user"])?;
+        return Ok(consumer);
+    }
+}
