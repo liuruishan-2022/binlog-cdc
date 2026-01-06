@@ -2,7 +2,7 @@ use tracing::info;
 use url::Url;
 
 use crate::{
-    sink::{SinkStream, mysql_sink::MysqlSink},
+    sink::mysql_sink::MysqlSink,
     source::kafka_source::KafkaSource,
 };
 

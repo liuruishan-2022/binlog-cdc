@@ -1,6 +1,5 @@
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
-use serde_json::Value;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use tracing::info;

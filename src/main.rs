@@ -40,11 +40,11 @@ async fn main() {
     let flink_cdc_path = args.flink_cdc().to_string();
 
     let registry = Arc::new(Mutex::new(Registry::default()));
-    let registry_binlog = registry.clone();
+    let _registry_binlog = registry.clone();
 
     tokio::spawn(async move {
         //临时屏蔽掉binlog的代码,测试下从Kafka消费数据写入到Mysql的功能
-        let config = FlinkCdc::read_from(&flink_cdc_path);
+        let _config = FlinkCdc::read_from(&flink_cdc_path);
         //binlog::dump_and_parse(registry_binlog, &config).await;
         pipeline::start_pipeline().await;
     });
