@@ -1,6 +1,11 @@
+use std::sync::atomic::Ordering;
+
+use futures_util::TryStreamExt;
 use sqlx::MySqlPool;
+use sqlx::Row;
 use tracing::warn;
 
+use crate::source;
 use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
 
 ///
@@ -25,8 +30,8 @@ impl MysqlSink {
         MysqlSink { pool }
     }
 
-    pub async fn desc_table(&self, table_id: u64, db_name: &str, table_name: &str) -> TableMeta {
-        let sql = format!("desc `{}`.{}", db_name, table_name);
+    pub async fn desc_table(&self, table: &str) -> TableMeta {
+        let sql = format!("desc {}", table);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
 
         let mut source_position = 1;
@@ -36,20 +41,11 @@ impl MysqlSink {
             let key: Result<Vec<u8>, sqlx::Error> = row.try_get("Key");
             let key = Self::judge_primary_key(key);
 
-            columns.push(ColumnMeta {
-                ordinal_position: source_position,
-                column_name: field.to_string(),
-                is_primaty_key: key,
-            });
+            columns.push(ColumnMeta::new(source_position, field.to_string(), key));
             source_position = source_position + 1;
         }
 
-        return TableMeta::new(
-            table_id,
-            db_name.to_string(),
-            table_name.to_string(),
-            columns,
-        );
+        return TableMeta::new(table.to_string(), columns);
     }
 
     fn judge_primary_key(key: Result<Vec<u8>, sqlx::Error>) -> bool {
@@ -80,8 +76,22 @@ impl SinkStream for MysqlSink {
 ///
 #[derive(Debug)]
 pub struct TableMeta {
-    db_name: String,
-    table_name: String,
+    table: String,
     columns: Vec<ColumnMeta>,
     primary_keys: Vec<String>,
+}
+
+impl TableMeta {
+    pub fn new(table: String, columns: Vec<ColumnMeta>) -> Self {
+        let keys = columns
+            .iter()
+            .filter(|ele| ele.is_primary())
+            .map(|ele| ele.column_name().to_string())
+            .collect::<Vec<String>>();
+        TableMeta {
+            table,
+            columns,
+            primary_keys: keys,
+        }
+    }
 }
