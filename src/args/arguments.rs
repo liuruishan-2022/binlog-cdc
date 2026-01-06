@@ -3,7 +3,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author,version,about,long_about = None)]
 pub struct Args {
-    #[arg(long)]
+    #[arg(long, short)]
     flink_cdc: String,
 }
 

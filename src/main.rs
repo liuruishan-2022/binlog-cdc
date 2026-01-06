@@ -44,7 +44,7 @@ async fn main() {
 
     tokio::spawn(async move {
         //临时屏蔽掉binlog的代码,测试下从Kafka消费数据写入到Mysql的功能
-        let _config = FlinkCdc::read_from(&flink_cdc_path);
+        //let _config = FlinkCdc::read_from(&flink_cdc_path);
         //binlog::dump_and_parse(registry_binlog, &config).await;
         pipeline::start_pipeline().await;
     });

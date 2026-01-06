@@ -32,7 +32,8 @@ impl MysqlSink {
         MysqlSink { pool, cache }
     }
 
-    pub async fn table_info(&self, table: &str) -> TableMeta {
+    pub async fn table_info(&self, source: &str) -> TableMeta {
+        let table = "sedp_biz_test.sedp_gsms_user";
         if let Some(meta) = self.cache.get(table) {
             return meta;
         }
@@ -74,10 +75,10 @@ impl MysqlSink {
             .map(|ele| {
                 let data = debezium
                     .after_column(ele.column_name())
-                    .expect("fetch column data error")
-                    .to_string();
-                format!("'{}'", data)
+                    .map(|val| format!("{}", val.to_string()));
+                return data;
             })
+            .filter_map(|ele| ele)
             .collect::<Vec<String>>()
             .join(", ");
         let sql = format!(
@@ -97,10 +98,10 @@ impl MysqlSink {
             .map(|ele| {
                 let data = debezium
                     .after_column(ele.column_name())
-                    .expect("fetch column data error")
-                    .to_string();
-                format!("{} = '{}'", ele.column_name(), data)
+                    .map(|val| format!("{} = '{}'", ele.column_name(), val.to_string()));
+                return data;
             })
+            .filter_map(|ele| ele)
             .collect::<Vec<String>>()
             .join(", ");
         let where_sql = meta
@@ -109,10 +110,10 @@ impl MysqlSink {
             .map(|ele| {
                 let data = debezium
                     .before_column(ele)
-                    .expect("fetch column data error")
-                    .to_string();
-                format!("{} = '{}'", ele, data)
+                    .map(|val| format!("{} = '{}'", ele, val.to_string()));
+                return data;
             })
+            .filter_map(|ele| ele)
             .collect::<Vec<String>>()
             .join(" AND ");
         let sql = format!(
