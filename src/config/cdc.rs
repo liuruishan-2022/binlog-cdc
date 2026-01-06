@@ -107,6 +107,20 @@ impl FlinkCdc {
     pub fn pipeline_parallelism(&self) -> u32 {
         self.pipeline.parallelism()
     }
+
+    ///
+    /// route信息的获取
+    pub fn route_sink(&self, source: &str) -> Option<String> {
+        return self
+            .route
+            .as_ref()
+            .map(|ele| {
+                ele.iter()
+                    .find(|route| route.source() == source)
+                    .map(|ele| ele.sink().to_string())
+            })
+            .unwrap_or(None);
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -309,6 +323,20 @@ pub struct Route {
     source: String,
     sink: String,
     description: Option<String>,
+}
+
+impl Route {
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn sink(&self) -> &str {
+        &self.sink
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]

@@ -72,7 +72,7 @@ impl TableSchema {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableMeta {
     table_id: u64,
     db_name: String,
@@ -137,7 +137,7 @@ impl TableMeta {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ColumnMeta {
     ordinal_position: u32,
     column_name: String,

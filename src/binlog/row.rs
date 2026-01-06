@@ -313,6 +313,10 @@ impl DebeziumFormat {
     pub fn keys(&self) -> String {
         self.key.keys_json()
     }
+
+    pub fn op(&self) -> &str {
+        self.op.as_str()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

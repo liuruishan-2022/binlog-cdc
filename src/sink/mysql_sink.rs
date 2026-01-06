@@ -1,11 +1,12 @@
-use std::sync::atomic::Ordering;
-
+use futures::FutureExt;
 use futures_util::TryStreamExt;
+use moka::sync::Cache;
 use sqlx::MySqlPool;
 use sqlx::Row;
+use tracing::info;
 use tracing::warn;
 
-use crate::source;
+use crate::binlog::row::DebeziumFormat;
 use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
 
 ///
@@ -20,6 +21,7 @@ use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
 ///
 pub struct MysqlSink {
     pool: MySqlPool,
+    cache: Cache<String, TableMeta>,
 }
 
 impl MysqlSink {
@@ -27,7 +29,16 @@ impl MysqlSink {
         let pool = MySqlPool::connect(url)
             .await
             .expect(format!("connect to mysql use:{} failed", url).as_str());
-        MysqlSink { pool }
+        let cache = Cache::new(10000);
+        MysqlSink { pool, cache }
+    }
+
+    pub async fn table_info(&self, table: &str) -> TableMeta {
+        if let Some(meta) = self.cache.get(table) {
+            return meta;
+        }
+
+        self.desc_table(table).await
     }
 
     pub async fn desc_table(&self, table: &str) -> TableMeta {
@@ -66,15 +77,30 @@ impl MysqlSink {
 }
 
 impl SinkStream for MysqlSink {
-    async fn handle_messages(&self, messages: Vec<crate::binlog::row::DebeziumFormat>) {
-        todo!("等待实现");
+    async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
+        for debezium in messages {
+            match debezium.op() {
+                "d" => {
+                    info!("执行删除的动作");
+                }
+                "c" => {
+                    info!("执行create动作");
+                }
+                "u" => {
+                    info!("执行更新的动作");
+                }
+                _ => {
+                    warn!("未知的操作类型:{}", debezium.op());
+                }
+            }
+        }
     }
 }
 
 ///
 /// 放置table的元数据信息的struct
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableMeta {
     table: String,
     columns: Vec<ColumnMeta>,
