@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 ///
@@ -32,14 +34,21 @@ pub struct Mysql {
     tables: String,
     #[serde(rename = "server-id")]
     server_id: String,
+
     #[serde(rename = "scan.startup.mode")]
     mode: String,
     #[serde(rename = "scan.startup.specific-offset.file")]
     binlog_filename: Option<String>,
     #[serde(rename = "scan.startup.specific-offset.pos")]
     binlog_offset: Option<u32>,
-    #[serde(rename = "scan.startup.specific-offset.timestamp-millis")]
+
+    #[serde(rename = "scan.startup.timestamp-millis")]
     timestamp_millis: Option<u32>,
+
+    #[serde(rename = "connect.max-retries")]
+    connect_max_retries: Option<u32>,
+    #[serde(rename = "connect.timeout")]
+    connect_timeout: Option<Duration>,
 }
 
 impl Mysql {
@@ -65,6 +74,8 @@ impl Mysql {
             binlog_filename: None,
             binlog_offset: None,
             timestamp_millis: None,
+            connect_max_retries: None,
+            connect_timeout: None,
         }
     }
 }
