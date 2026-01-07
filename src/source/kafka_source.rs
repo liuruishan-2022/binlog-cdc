@@ -6,7 +6,10 @@ use rdkafka::{
 };
 use tracing::{info, warn};
 
-use crate::{binlog::row::DebeziumFormat, config::source::Kafka, sink::SinkStream};
+use crate::{
+    binlog::row::DebeziumFormat, config::CdcConfig, config::cdc::Route, config::source::Kafka,
+    sink::SinkStream,
+};
 
 ///
 /// 放置Kafka作为数据源的处理代码
@@ -18,6 +21,7 @@ where
 {
     sink: T,
     source_config: &'a Kafka,
+    cdc_config: &'a CdcConfig,
 }
 
 impl<'a, T> KafkaSource<'a, T>
@@ -34,10 +38,11 @@ where
     const COMPRESSION_TYPE: &'static str = "compression.type";
     const HEARTBEAT_INTERVAL_MS: &'static str = "heartbeat.interval.ms";
     const LINKGER_MS: &'static str = "linger.ms";
-    pub fn new(sink: T, source_config: &'a Kafka) -> Self {
+    pub fn new(sink: T, source_config: &'a Kafka, cdc_config: &'a CdcConfig) -> Self {
         KafkaSource {
             sink,
             source_config,
+            cdc_config,
         }
     }
 
@@ -66,7 +71,11 @@ where
             .set(Self::HEARTBEAT_INTERVAL_MS, "3000")
             .set(Self::SESSION_TIMEOUT_MS, "45000")
             .create::<StreamConsumer>()?;
-        consumer.subscribe(&["dev-kafka-gsms-user"])?;
+        let topics = self
+            .cdc_config
+            .route_sources()
+            .expect("no config topic for kafka source!");
+        consumer.subscribe(&topics)?;
         return Ok(consumer);
     }
 }

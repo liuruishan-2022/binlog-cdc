@@ -28,9 +28,21 @@ impl CdcConfig {
     pub fn sink(&self) -> &sink::Sink {
         &self.sink
     }
+
+    ///
+    /// route相关的信息获取
     pub fn route(&self) -> Option<&Vec<Route>> {
         self.route.as_ref()
     }
+
+    ///
+    /// 尝试Option的链式的写法
+    pub fn route_sources(&self) -> Option<Vec<&str>> {
+        self.route
+            .as_ref()
+            .map(|route| route.iter().map(|ele| ele.source()).collect::<Vec<&str>>())
+    }
+
     pub fn pipeline(&self) -> Option<&Pipeline> {
         self.pipeline.as_ref()
     }
