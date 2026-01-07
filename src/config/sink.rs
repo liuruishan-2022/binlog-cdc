@@ -17,6 +17,14 @@ pub struct Kafka {
     name: String,
     #[serde(rename = "properties.bootstrap.servers")]
     bootstrap_server: String,
+    #[serde(rename = "properties.compression.type")]
+    compression_type: String,
+    topic: String,
+
+    #[serde(rename = "properties.batch.size")]
+    batch_size: Option<u32>,
+    #[serde(rename = "properties.linger.ms")]
+    linger_ms: Option<u32>,
 }
 
 impl Kafka {
@@ -24,6 +32,10 @@ impl Kafka {
         Kafka {
             name: name.to_string(),
             bootstrap_server: bootstrap_server.to_string(),
+            compression_type: "none".to_string(),
+            topic: "default".to_string(),
+            batch_size: None,
+            linger_ms: None,
         }
     }
 }
