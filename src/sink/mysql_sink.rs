@@ -32,7 +32,7 @@ impl MysqlSink {
         MysqlSink { pool, cache }
     }
 
-    pub async fn table_info(&self, source: &str) -> TableMeta {
+    pub async fn table_info(&self, _source: &str) -> TableMeta {
         let table = "sedp_biz_test.sedp_gsms_user";
         if let Some(meta) = self.cache.get(table) {
             return meta;

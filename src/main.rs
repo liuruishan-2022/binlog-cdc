@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 
-use crate::{args::arguments::Args, config::cdc::FlinkCdc};
+use crate::args::arguments::Args;
 use clap::Parser;
 
 pub mod args;

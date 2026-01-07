@@ -1,6 +1,5 @@
-use tracing::warn;
 
-use crate::config::{load_config, sink, source};
+use crate::config::load_config;
 
 ///
 /// Pipeline是组合Source和Sink的地方
