@@ -6,36 +6,39 @@ use rdkafka::{
 };
 use tracing::{info, warn};
 
-use crate::{binlog::row::DebeziumFormat, sink::SinkStream};
+use crate::{binlog::row::DebeziumFormat, config::source::Kafka, sink::SinkStream};
 
 ///
 /// 放置Kafka作为数据源的处理代码
 ///
 
-pub struct KafkaSource<T>
+pub struct KafkaSource<'a, T>
 where
     T: SinkStream,
 {
     sink: T,
+    source_config: &'a Kafka,
 }
 
-impl<T> KafkaSource<T>
+impl<'a, T> KafkaSource<'a, T>
 where
     T: SinkStream,
 {
-    const BOOTSTRAP_SERVERS: &str = "bootstrap.servers";
-    const GROUP_ID: &str = "group.id";
-    const AUTO_OFFSET_RESET: &str = "auto.offset.reset";
-    const EARLIEST: &str = "earliest";
-    const MESSAGE_TIMEOUT_MS: &str = "message.timeout.ms";
-    const SESSION_TIMEOUT_MS: &str = "session.timeout.ms";
-    const BATCH_SIZE: &str = "batch.size";
-    const COMPRESSION_TYPE: &str = "compression.type";
-    const HEARTBEAT_INTERVAL_MS: &str = "heartbeat.interval.ms";
-    const LINKGER_MS: &str = "linger.ms";
-
-    pub fn new(sink: T) -> Self {
-        KafkaSource { sink }
+    const BOOTSTRAP_SERVERS: &'static str = "bootstrap.servers";
+    const GROUP_ID: &'static str = "group.id";
+    const AUTO_OFFSET_RESET: &'static str = "auto.offset.reset";
+    const EARLIEST: &'static str = "earliest";
+    const MESSAGE_TIMEOUT_MS: &'static str = "message.timeout.ms";
+    const SESSION_TIMEOUT_MS: &'static str = "session.timeout.ms";
+    const BATCH_SIZE: &'static str = "batch.size";
+    const COMPRESSION_TYPE: &'static str = "compression.type";
+    const HEARTBEAT_INTERVAL_MS: &'static str = "heartbeat.interval.ms";
+    const LINKGER_MS: &'static str = "linger.ms";
+    pub fn new(sink: T, source_config: &'a Kafka) -> Self {
+        KafkaSource {
+            sink,
+            source_config,
+        }
     }
 
     pub async fn start(&self) {
@@ -54,8 +57,11 @@ where
 
     fn build_consumer(&self) -> Result<StreamConsumer, KafkaError> {
         let consumer = ClientConfig::new()
-            .set(Self::BOOTSTRAP_SERVERS, "172.16.1.118:9092")
-            .set(Self::GROUP_ID, "kafka-to-mysql-cg-20260106")
+            .set(
+                Self::BOOTSTRAP_SERVERS,
+                self.source_config.bootstrap_server(),
+            )
+            .set(Self::GROUP_ID, self.source_config.group_id())
             .set(Self::AUTO_OFFSET_RESET, Self::EARLIEST)
             .set(Self::HEARTBEAT_INTERVAL_MS, "3000")
             .set(Self::SESSION_TIMEOUT_MS, "45000")

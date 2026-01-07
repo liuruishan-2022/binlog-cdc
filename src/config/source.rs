@@ -21,7 +21,24 @@ pub enum Source {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Kafka {
     name: String,
+    #[serde(rename = "properties.bootstrap.servers")]
     bootstrap_server: String,
+    #[serde(rename = "properties.group.id")]
+    group_id: String,
+}
+
+impl Kafka {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn bootstrap_server(&self) -> &str {
+        &self.bootstrap_server
+    }
+
+    pub fn group_id(&self) -> &str {
+        &self.group_id
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -89,6 +106,7 @@ mod tests {
         let kafka = Kafka {
             name: "kafka_source".to_string(),
             bootstrap_server: "localhost:9092".to_string(),
+            group_id: "cg-001".to_string(),
         };
 
         let kafka = Source::Kafka(kafka);

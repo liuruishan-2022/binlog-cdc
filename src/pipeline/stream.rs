@@ -2,6 +2,7 @@ use tracing::info;
 use url::Url;
 
 use crate::{
+    config::{CdcConfig, sink, source},
     sink::mysql_sink::MysqlSink,
     source::kafka_source::KafkaSource,
 };
@@ -10,28 +11,15 @@ use crate::{
 /// 提供无限stream的能力对接
 /// 临时先给一个: Kafka ---> Mysql的能力
 
-pub struct StreamPipeline {
-    source: KafkaSource<MysqlSink>,
-}
-
-impl StreamPipeline {
-    pub async fn new() -> Self {
-        let sink = MysqlSink::new(&Self::url()).await;
-        let source = KafkaSource::new(sink);
-        StreamPipeline { source }
-    }
-
-    pub fn url() -> String {
-        let uri = format!("mysql://{}:{}", "172.16.1.77", "3306");
-        let mut uri = Url::parse(&uri).unwrap();
-        let _ = uri.set_username("root");
-        let _ = uri.set_password(Some("jx@xw!@#$~|{}"));
-
-        return uri.as_str().to_string();
-    }
-
-    pub async fn start(&self) {
-        info!("start stream pipeline Kafka ---> Mysql");
-        self.source.start().await;
+pub(crate) async fn pipeline(config: &CdcConfig) {
+    match (config.source(), config.sink()) {
+        (source::Source::Kafka(kafka), sink::Sink::Mysql(mysql)) => {
+            let sink = MysqlSink::new(&mysql.url()).await;
+            let source = KafkaSource::new(sink, kafka);
+            source.start().await;
+        }
+        _ => {
+            tracing::warn!("do not support this config");
+        }
     }
 }

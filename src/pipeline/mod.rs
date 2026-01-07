@@ -1,4 +1,9 @@
-use crate::pipeline::stream::StreamPipeline;
+use tracing::warn;
+
+use crate::{
+    config::{load_config, sink, source},
+    pipeline::stream::StreamPipeline,
+};
 
 ///
 /// Pipeline是组合Source和Sink的地方
@@ -8,7 +13,7 @@ use crate::pipeline::stream::StreamPipeline;
 ///
 pub mod stream;
 
-pub async fn start_pipeline() {
-    let pipeline = StreamPipeline::new().await;
-    pipeline.start().await;
+pub async fn start_pipeline(config_path: &str) {
+    let config = load_config(config_path);
+    stream::pipeline(&config).await;
 }

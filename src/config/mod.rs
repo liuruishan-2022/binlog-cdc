@@ -1,19 +1,45 @@
+use std::fs;
+
 use serde::{Deserialize, Serialize};
+
+use crate::config::cdc::{Pipeline, Route};
 
 pub mod cdc;
 pub mod sink;
 pub mod source;
 
+pub fn load_config(config_path: &str) -> CdcConfig {
+    let content = fs::read_to_string(config_path).expect("Unable to read config file");
+    serde_yaml::from_str(&content).expect("Unable to parse config file")
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct CdcConfig {
     source: source::Source,
     sink: sink::Sink,
+    route: Option<Vec<Route>>,
+    pipeline: Option<Pipeline>,
+}
+
+impl CdcConfig {
+    pub fn source(&self) -> &source::Source {
+        &self.source
+    }
+    pub fn sink(&self) -> &sink::Sink {
+        &self.sink
+    }
+    pub fn route(&self) -> Option<&Vec<Route>> {
+        self.route.as_ref()
+    }
+    pub fn pipeline(&self) -> Option<&Pipeline> {
+        self.pipeline.as_ref()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::config::{
-        CdcConfig,
+        CdcConfig, load_config,
         sink::{self, Kafka},
         source,
     };
@@ -59,9 +85,17 @@ sink:
                 "specific-offset",
             )),
             sink: sink::Sink::Kafka(Kafka::new("Kafka", "172.16.1.118:9092")),
+            route: None,
+            pipeline: None,
         };
 
         let yaml_str = serde_yaml::to_string(&config).unwrap();
         println!("{}", yaml_str);
+    }
+
+    #[test]
+    fn test_load_config() {
+        let config = load_config("./kafka-to-mysql.yaml");
+        println!("{:#?}", config);
     }
 }

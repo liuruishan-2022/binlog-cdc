@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 ///
 /// 提供各种类型的sink配置信息
@@ -42,6 +43,29 @@ impl Kafka {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Mysql {
-    name: String,
-    url: String,
+    hostname: String,
+    port: u32,
+    username: String,
+    password: String,
+}
+
+impl Mysql {
+    ///
+    /// 获取url的字符串,能够处理一些有特殊字符的情况
+    pub fn url(&self) -> String {
+        let uri = format!("mysql://{}:{}", self.hostname, self.port);
+        let mut uri = Url::parse(&uri).unwrap();
+        let _ = uri.set_username(self.username());
+        let _ = uri.set_password(Some(self.password()));
+
+        return uri.as_str().to_string();
+    }
+
+    pub fn username(&self) -> &str {
+        return self.username.as_str();
+    }
+
+    pub fn password(&self) -> &str {
+        return self.password.as_str();
+    }
 }
