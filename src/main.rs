@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 
-use crate::args::arguments::Args;
+use crate::{args::arguments::Args, config::cdc::FlinkCdc};
 use clap::Parser;
 
 pub mod args;
@@ -40,13 +40,12 @@ async fn main() {
     let flink_cdc_path = args.flink_cdc().to_string();
 
     let registry = Arc::new(Mutex::new(Registry::default()));
-    let _registry_binlog = registry.clone();
+    let registry_binlog = registry.clone();
 
     tokio::spawn(async move {
-        //临时屏蔽掉binlog的代码,测试下从Kafka消费数据写入到Mysql的功能
-        //let _config = FlinkCdc::read_from(&flink_cdc_path);
-        //binlog::dump_and_parse(registry_binlog, &config).await;
-        pipeline::start_pipeline(&flink_cdc_path).await;
+        let config = FlinkCdc::read_from(&flink_cdc_path);
+        binlog::dump_and_parse(registry_binlog, &config).await;
+        //pipeline::start_pipeline(&flink_cdc_path).await;
     });
 
     let registry_metrics = registry.clone();
