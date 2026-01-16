@@ -355,32 +355,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "binlog-cdc"
-version = "1.2.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "chrono",
- "clap",
- "futures-util",
- "moka",
- "mysql-binlog-connector-rust",
- "prometheus-client",
- "rdkafka",
- "regex",
- "rust_decimal",
- "serde",
- "serde_json",
- "serde_yaml",
- "sqlparser",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "binlog-file-rs"
 version = "0.1.0"
 dependencies = [
@@ -907,6 +881,32 @@ dependencies = [
  "crc32fast",
  "libz-sys",
  "miniz_oxide",
+]
+
+[[package]]
+name = "flink-cdc-rs"
+version = "1.2.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "futures-util",
+ "moka",
+ "mysql-binlog-connector-rust",
+ "prometheus-client",
+ "rdkafka",
+ "regex",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlparser",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
