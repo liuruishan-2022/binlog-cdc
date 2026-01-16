@@ -148,3 +148,21 @@ transform 字段解释:
 ## 1.2.0
 
 1. 支撑数据源是 Kafka--->mysql 目标的配置和功能
+
+# 问题记录
+
+## x.1 生产在跑了:几百万的 binlog 解析之后,出现了如下的报错信息:
+
+```bash
+2026-01-16 15:31:38
+2026-01-16T15:31:38.719977769+08:00 stdout F 2026-01-16T15:31:38.717  INFO binlog_cdc::sink::kafka_sink: send message ok,keys:{"TableId":"mos2_gsms.gsms_msg_pack_sms_0116","id":1461740446534438912}!
+2026-01-16 15:31:38
+2026-01-16T15:31:38.719997096+08:00 stderr F
+
+2026-01-16 15:31:38
+2026-01-16T15:31:38.720020204+08:00 stderr F thread 'tokio-runtime-worker' (7) panicked at src/binlog/mod.rs:47:50:
+2026-01-16 15:31:38
+2026-01-16T15:31:38.720029391+08:00 stderr F read mysql binlog error!: IoError(Error { kind: InvalidData, message: "stream did not contain valid UTF-8" })
+2026-01-16 15:31:38
+2026-01-16T15:31:38.720037141+08:00 stderr F note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```
