@@ -7,7 +7,10 @@ use crate::args::arguments::Args;
 pub mod args;
 pub mod parse;
 
-#[tokio::main]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     tracing_subscriber::fmt()
         .with_thread_ids(true)
