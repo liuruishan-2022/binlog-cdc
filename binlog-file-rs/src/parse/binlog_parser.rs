@@ -9,12 +9,19 @@ pub async fn parse_binlog(file: &str) {
         checksum_length: 4,
         table_map_event_by_table_id: HashMap::new(),
     };
+    let mut count = 0;
     match parser.check_magic(&mut file) {
         Ok(_) => loop {
-            if let Ok((header, data)) = parser.next(&mut file) {
-                info!("成功解析一条binlog数据event");
-            } else {
-                warn!("解析binlog数据失败");
+            match parser.next(&mut file) {
+                Ok((header, data)) => {
+                    count = count + 1;
+                    if count % 1000000 == 0 {
+                        info!("成功解析:{count}条binlog数据的event");
+                    }
+                }
+                Err(err) => {
+                    warn!("解析binlog数据失败:{:?}", err);
+                }
             }
         },
         Err(e) => {
