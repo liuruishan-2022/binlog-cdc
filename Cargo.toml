@@ -1,4 +1,5 @@
 [workspace]
-members = ["binlog-file-rs","flink-cdc-rs"]
+members = ["binlog-file-rs", "flink-cdc-rs"]
 
 [workspace.dependencies]
+clap = "4.5.54"
