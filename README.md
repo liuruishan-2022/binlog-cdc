@@ -149,6 +149,13 @@ transform 字段解释:
 
 1. 支撑数据源是 Kafka--->mysql 目标的配置和功能
 
+# 7. 想法
+
+## 7.1 一些关于项目的想法
+
+1. 计划找到一个稳定的 mysql binlog 协议采集依赖,替换掉目前的 mysql-binlog-connector
+2. 计划替换掉 rdkafka 为 rskafka,我实验了下 rskafka,发现性能很好,完美的诠释了 rust 的性能指标
+
 # 问题记录
 
 ## x.1 生产在跑了:几百万的 binlog 解析之后,出现了如下的报错信息:
