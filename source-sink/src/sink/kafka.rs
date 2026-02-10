@@ -5,12 +5,10 @@
 use crate::sink::Sink;
 use async_trait::async_trait;
 use rskafka::client::partition::PartitionClient;
-use rskafka::client::producer::producer::Producer;
-use rskafka::client::producer::record::Record;
 use rskafka::client::Client;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 #[derive(Debug, Clone)]
 pub struct KafkaSinkConfig {
@@ -44,7 +42,7 @@ impl Default for KafkaSinkConfig {
 pub struct KafkaSink {
     config: KafkaSinkConfig,
     client: Option<Client>,
-    producer: Option<Producer<PartitionClient>>,
+    partition_client: Option<PartitionClient>,
     running: Arc<AtomicBool>,
 }
 
@@ -61,7 +59,7 @@ impl KafkaSink {
         Self {
             config,
             client: None,
-            producer: None,
+            partition_client: None,
             running: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -75,9 +73,7 @@ impl KafkaSink {
 
         let client = Client::new_with_opts(
             self.config.brokers.clone(),
-            rskafka::client::ClientOptions {
-                ..Default::default()
-            },
+            Default::default(),
         )
         .await?;
 
@@ -85,13 +81,12 @@ impl KafkaSink {
         Ok(())
     }
 
-    async fn ensure_producer(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.producer.is_none() {
+    async fn ensure_partition_client(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.partition_client.is_none() {
             let client = self.client.as_ref().ok_or("Client not initialized")?;
 
-            // Get partition client
             let partition = if self.config.partition < 0 {
-                0 // Default to partition 0 for now
+                0
             } else {
                 self.config.partition
             };
@@ -102,7 +97,7 @@ impl KafkaSink {
                 rskafka::client::partition::UnknownTopicHandling::Retry,
             ).await?;
 
-            self.producer = Some(Producer::new(partition_client));
+            self.partition_client = Some(partition_client);
         }
         Ok(())
     }

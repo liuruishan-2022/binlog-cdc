@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
 
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct DebeziumFormat {
     pub before: Option<Value>,
 
@@ -61,8 +61,7 @@ impl DebeziumFormat {
     }
 
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self)
-            .expect("Failed to serialize DebeziumFormat to JSON")
+        serde_json::to_string(self).expect("Failed to serialize DebeziumFormat to JSON")
     }
 
     pub fn keys(&self) -> String {
@@ -109,9 +108,7 @@ pub fn format_timestamp(timestamp: i64) -> String {
 
     let millis = timestamp / 1000;
     match Local.timestamp_millis_opt(millis) {
-        chrono::LocalResult::Single(time) => {
-            time.format("%Y-%m-%d %H:%M:%S").to_string()
-        }
+        chrono::LocalResult::Single(time) => time.format("%Y-%m-%d %H:%M:%S").to_string(),
         _ => {
             warn!("timestamp is invalid: {}!", timestamp);
             String::new()
@@ -175,12 +172,7 @@ mod tests {
     #[test]
     fn test_debezium_to_json() {
         let after = json!({"id": 1, "name": "Alice"});
-        let event = DebeziumFormat::insert(
-            after,
-            "testdb",
-            "users",
-            MessageKey::new(Map::new()),
-        );
+        let event = DebeziumFormat::insert(after, "testdb", "users", MessageKey::new(Map::new()));
 
         let json_str = event.to_json();
         assert!(json_str.contains("\"op\":\"c\""));
@@ -191,12 +183,7 @@ mod tests {
     #[test]
     fn test_debezium_after_column() {
         let after = json!({"id": 1, "name": "Alice", "age": 30});
-        let event = DebeziumFormat::insert(
-            after,
-            "testdb",
-            "users",
-            MessageKey::new(Map::new()),
-        );
+        let event = DebeziumFormat::insert(after, "testdb", "users", MessageKey::new(Map::new()));
 
         assert_eq!(event.after_column("name"), Some(&json!("Alice")));
         assert_eq!(event.after_column("age"), Some(&json!(30)));

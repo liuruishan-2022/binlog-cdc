@@ -70,9 +70,7 @@ impl KafkaSource {
 
         let client = Client::new_with_opts(
             self.config.brokers.clone(),
-            rskafka::client::ClientOptions {
-                ..Default::default()
-            },
+            Default::default(),
         )
         .await?;
 
@@ -113,7 +111,7 @@ impl Source for KafkaSource {
             {
                 Ok(builder) => {
                     match builder
-                        .with_start_offset(rskafka::client::consumer::Offset::AtLatest)
+                        .with_start_offset(rskafka::client::consumer::OffsetAt::AtLatest)
                         .build()
                         .await
                     {

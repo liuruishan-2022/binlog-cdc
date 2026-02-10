@@ -65,7 +65,7 @@ where
         let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
         self.tx = Some(tx);
 
-        let source = self.source.take().ok_or("Source already consumed")?;
+        let mut source = self.source.take().ok_or("Source already consumed")?;
         source.start().await?;
         info!("Pipeline '{}': source started", self.name);
 
