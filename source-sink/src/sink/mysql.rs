@@ -203,7 +203,7 @@ impl MySqlSink {
     async fn get_table_meta(&self, database: &str, table: &str) -> Result<TableMeta, Box<dyn std::error::Error>> {
         let key = format!("{}.{}", database, table);
 
-        if let Some(meta) = self.cache.get(&key) {
+        if let Some(meta) = self.cache.get(&key).await {
             debug!("Cache hit for table: {}", key);
             return Ok(meta);
         }

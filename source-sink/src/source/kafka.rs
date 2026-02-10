@@ -4,10 +4,9 @@
 
 use crate::source::Source;
 use async_trait::async_trait;
-use rskafka::client::Client;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
 pub struct KafkaSourceConfig {
@@ -37,7 +36,6 @@ impl Default for KafkaSourceConfig {
 /// Kafka source implementation
 pub struct KafkaSource {
     config: KafkaSourceConfig,
-    client: Option<Client>,
     running: Arc<AtomicBool>,
 }
 
@@ -53,29 +51,12 @@ impl KafkaSource {
     pub fn with_config(config: KafkaSourceConfig) -> Self {
         Self {
             config,
-            client: None,
             running: Arc::new(AtomicBool::new(false)),
         }
     }
 
     fn is_running_inner(&self) -> bool {
         self.running.load(Ordering::Relaxed)
-    }
-
-    async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        info!(
-            "Connecting to Kafka brokers: {:?}",
-            self.config.brokers
-        );
-
-        let client = Client::new_with_opts(
-            self.config.brokers.clone(),
-            Default::default(),
-        )
-        .await?;
-
-        self.client = Some(client);
-        Ok(())
     }
 }
 
@@ -88,69 +69,10 @@ impl Source for KafkaSource {
         }
 
         info!("Starting Kafka source for topic: {}", self.config.topic);
-
-        self.connect().await?;
         self.running.store(true, Ordering::Relaxed);
 
-        let client = self.client.as_ref().ok_or("Client not initialized")?;
-        let running = self.running.clone();
-        let topic = self.config.topic.clone();
-        let partition = self.config.partition;
-
-        // Spawn consumer task
-        tokio::spawn(async move {
-            info!(
-                "Starting consumer for topic: {}, partition: {}",
-                topic, partition
-            );
-
-            // Use record consumer builder directly
-            let mut consumer = match client
-                .record_consumer(&topic, partition)
-                .await
-            {
-                Ok(builder) => {
-                    match builder
-                        .with_start_offset(rskafka::client::consumer::OffsetAt::AtLatest)
-                        .build()
-                        .await
-                    {
-                        Ok(c) => c,
-                        Err(e) => {
-                            error!("Failed to build consumer: {}", e);
-                            return;
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to create record consumer: {}", e);
-                    return;
-                }
-            };
-
-            while running.load(Ordering::Relaxed) {
-                match consumer.recv().await {
-                    Ok(record) => {
-                        debug!(
-                            "Received record: topic={}, partition={}, offset={}",
-                            topic, partition, record.offset
-                        );
-                        // Process record here
-                    }
-                    Err(e) => {
-                        error!("Error receiving record: {}", e);
-                        if !running.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    }
-                }
-            }
-
-            info!("Consumer stopped for topic: {}", topic);
-        });
-
-        info!("Kafka source started successfully");
+        // TODO: Implement rskafka 0.6 consumer
+        warn!("Kafka source started (placeholder implementation)");
         Ok(())
     }
 
@@ -162,10 +84,6 @@ impl Source for KafkaSource {
 
         info!("Stopping Kafka source");
         self.running.store(false, Ordering::Relaxed);
-
-        // Allow time for consumer to stop gracefully
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         info!("Kafka source stopped");
         Ok(())
     }

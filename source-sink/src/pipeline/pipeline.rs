@@ -78,7 +78,7 @@ where
 
         let running = self.running.clone();
         let pipeline_name = self.name.clone();
-        let sink_count = self.sinks.len();
+        let _sink_count = self.sinks.len();
 
         let mut sinks = std::mem::take(&mut self.sinks);
 

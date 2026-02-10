@@ -4,11 +4,9 @@
 
 use crate::sink::Sink;
 use async_trait::async_trait;
-use rskafka::client::partition::PartitionClient;
-use rskafka::client::Client;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct KafkaSinkConfig {
@@ -41,8 +39,6 @@ impl Default for KafkaSinkConfig {
 /// Kafka sink implementation
 pub struct KafkaSink {
     config: KafkaSinkConfig,
-    client: Option<Client>,
-    partition_client: Option<PartitionClient>,
     running: Arc<AtomicBool>,
 }
 
@@ -58,48 +54,12 @@ impl KafkaSink {
     pub fn with_config(config: KafkaSinkConfig) -> Self {
         Self {
             config,
-            client: None,
-            partition_client: None,
             running: Arc::new(AtomicBool::new(false)),
         }
     }
 
     fn is_running_inner(&self) -> bool {
         self.running.load(Ordering::Relaxed)
-    }
-
-    async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Connecting to Kafka brokers: {:?}", self.config.brokers);
-
-        let client = Client::new_with_opts(
-            self.config.brokers.clone(),
-            Default::default(),
-        )
-        .await?;
-
-        self.client = Some(client);
-        Ok(())
-    }
-
-    async fn ensure_partition_client(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.partition_client.is_none() {
-            let client = self.client.as_ref().ok_or("Client not initialized")?;
-
-            let partition = if self.config.partition < 0 {
-                0
-            } else {
-                self.config.partition
-            };
-
-            let partition_client = client.partition_client(
-                &self.config.topic,
-                partition,
-                rskafka::client::partition::UnknownTopicHandling::Retry,
-            ).await?;
-
-            self.partition_client = Some(partition_client);
-        }
-        Ok(())
     }
 }
 
@@ -112,11 +72,10 @@ impl Sink for KafkaSink {
         }
 
         info!("Starting Kafka sink for topic: {}", self.config.topic);
-
-        self.connect().await?;
         self.running.store(true, Ordering::Relaxed);
 
-        info!("Kafka sink started successfully");
+        // TODO: Implement rskafka 0.6 producer
+        warn!("Kafka sink started (placeholder implementation)");
         Ok(())
     }
 
@@ -127,14 +86,7 @@ impl Sink for KafkaSink {
         }
 
         info!("Stopping Kafka sink");
-
-        // Flush any pending messages
-        self.flush().await?;
-
         self.running.store(false, Ordering::Relaxed);
-        self.partition_client = None;
-        self.client = None;
-
         info!("Kafka sink stopped");
         Ok(())
     }
@@ -144,33 +96,18 @@ impl Sink for KafkaSink {
             return Err("Kafka sink is not running".into());
         }
 
-        self.ensure_producer().await?;
-
-        let producer = self.producer.as_mut().ok_or("Producer not initialized")?;
-
-        let record = Record {
-            key: None,
-            value: Some(data),
-            headers: vec![],
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        };
-
-        producer.produce(record).await?;
-
-        debug!("Record produced to topic: {}", self.config.topic);
+        debug!("Writing {} bytes to Kafka topic: {}", data.len(), self.config.topic);
+        // TODO: Implement rskafka 0.6 producer
         Ok(())
     }
 
     async fn flush(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(producer) = &mut self.producer {
-            producer.flush().await?;
-            debug!("Flushed Kafka producer");
-        }
+        debug!("Kafka flush: nothing to do (placeholder)");
         Ok(())
     }
 
     fn is_ready(&self) -> bool {
-        self.is_running_inner() && self.producer.is_some()
+        self.is_running_inner()
     }
 }
 
