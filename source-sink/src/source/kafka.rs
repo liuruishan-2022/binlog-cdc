@@ -2,51 +2,60 @@
 //!
 //! Provides high-performance Kafka consumer using rskafka.
 
-use crate::source::Source;
-use crate::pipeline::message::{PipelineMessage, RouteInfo};
 use crate::common::DebeziumFormat;
+use crate::config::Config;
+use crate::pipeline::message::{PipelineMessage, RouteInfo};
+use crate::source::Source;
 use async_trait::async_trait;
 use rskafka::client::ClientBuilder;
+use rskafka::client::partition::PartitionClient;
 use rskafka::client::partition::UnknownTopicHandling;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct KafkaSourceConfig {
     pub brokers: Vec<String>,
-    pub topic: String,
-    pub partition: i32,
     pub group_id: Option<String>,
     pub start_offset: String,
+    pub partition: i32,
 }
 
 impl Default for KafkaSourceConfig {
     fn default() -> Self {
         Self {
             brokers: vec!["localhost:9092".to_string()],
-            topic: "default-topic".to_string(),
-            partition: 0,
             group_id: None,
             start_offset: "latest".to_string(),
+            partition: 3,
         }
     }
 }
 
-/// Kafka source implementation
+pub struct TopicClient {
+    pub client: Arc<PartitionClient>,
+    pub current_offset: Arc<AtomicI64>,
+}
+
+/// Kafka source implementation with multi-topic support
 pub struct KafkaSource {
     config: KafkaSourceConfig,
     running: Arc<AtomicBool>,
     sender: Option<mpsc::Sender<PipelineMessage>>,
+    // Map topic name to its partition client and current offset
+    topic_clients: Arc<Mutex<HashMap<String, TopicClient>>>,
+    kafka_client: Option<Arc<rskafka::client::Client>>,
 }
 
 impl KafkaSource {
-    pub fn new(brokers: Vec<String>, topic: String) -> Self {
+    pub fn new(brokers: Vec<String>) -> Self {
         Self::with_config(KafkaSourceConfig {
             brokers,
-            topic,
             ..Default::default()
         })
     }
@@ -56,6 +65,8 @@ impl KafkaSource {
             config,
             running: Arc::new(AtomicBool::new(false)),
             sender: None,
+            topic_clients: Arc::new(Mutex::new(HashMap::new())),
+            kafka_client: None,
         }
     }
 
@@ -67,101 +78,175 @@ impl KafkaSource {
         info!("Connecting to Kafka brokers: {:?}", self.config.brokers);
 
         // Build client
-        let client = ClientBuilder::new(self.config.brokers.clone()).build().await?;
+        let client = ClientBuilder::new(self.config.brokers.clone())
+            .build()
+            .await?;
+        let client = Arc::new(client);
         info!("Kafka client created successfully");
 
-        // Get partition client
-        let partition_client = client
-            .partition_client(
-                self.config.topic.clone(),
-                self.config.partition,
-                UnknownTopicHandling::Retry,
-            )
-            .await?;
+        // List all available topics from Kafka cluster
+        let topics = client.list_topics().await?;
+        info!("Found {} topics in Kafka cluster", topics.len());
 
-        info!("Got partition client for {}-{}", self.config.topic, self.config.partition);
+        let mut topics_to_consume = Vec::new();
+        let partition = self.config.partition;
 
-        // Determine start offset - for "latest" we'll start from 0 and let it fetch latest
-        let start_offset = if self.config.start_offset == "earliest" {
-            0
-        } else {
-            0
-        };
+        for topic_metadata in &topics {
+            let topic_name = topic_metadata.name.clone();
+            info!("Found topic: {} with {} partitions",
+                topic_name,
+                topic_metadata.partitions.len()
+            );
 
-        info!("Starting consumption from offset: {}", start_offset);
+            // Check if the specified partition exists
+            let has_partition = topic_metadata.partitions
+                .iter()
+                .any(|&p| p == partition);
+
+            if has_partition {
+                topics_to_consume.push(topic_name);
+            } else {
+                warn!(
+                    "Topic {} does not have partition {}, skipping",
+                    topic_name, partition
+                );
+            }
+        }
+
+        if topics_to_consume.is_empty() {
+            warn!("No topics available with partition {}", partition);
+            return Ok(());
+        }
+
+        info!("Will consume from {} topics: {:?}", topics_to_consume.len(), topics_to_consume);
 
         let running = self.running.clone();
         let sender = self.sender.clone().unwrap();
-        let topic = self.config.topic.clone();
         let partition = self.config.partition;
 
-        tokio::spawn(async move {
-            let mut current_offset = start_offset;
+        // Spawn consumer tasks for each topic
+        for topic in topics_to_consume {
+            let topic_clone: String = topic.clone();
+            let sender_clone = sender.clone();
+            let running_clone = running.clone();
+            let client_clone = client.clone();
 
-            while running.load(Ordering::Relaxed) {
-                match partition_client
-                    .fetch_records(current_offset, 1..100_000, 1000)
+            tokio::spawn(async move {
+                info!("Starting consumer for topic: {}", topic_clone);
+
+                // Create partition client
+                let partition_client: PartitionClient = match client_clone
+                    .partition_client(topic_clone.clone(), partition, UnknownTopicHandling::Retry)
                     .await
                 {
-                    Ok((records, high_watermark)) => {
-                        let record_count = records.len();
-                        debug!("Fetched {} records, high_watermark: {}", record_count, high_watermark);
+                    Ok(pc) => pc,
+                    Err(e) => {
+                        error!(
+                            "Failed to create partition client for {}: {}",
+                            topic_clone, e
+                        );
+                        return;
+                    }
+                };
 
-                        for record in &records {
-                            let offset = record.offset;
+                let start_offset = 0i64;
+                let mut current_offset = start_offset;
 
-                            info!("Kafka message: topic={}, partition={}, offset={}",
-                                topic, partition, offset);
+                info!(
+                    "Starting consumption from topic: {}, partition: {}, offset: {}",
+                    topic_clone, partition, start_offset
+                );
 
-                            let key_len = record.record.key.as_ref().map(|k| k.len()).unwrap_or(0);
-                            let value_len = record.record.value.as_ref().map(|v| v.len()).unwrap_or(0);
-                            let headers_count = record.record.headers.len();
+                while running_clone.load(Ordering::Relaxed) {
+                    match partition_client
+                        .fetch_records(current_offset, 1..100_000, 1000)
+                        .await
+                    {
+                        Ok((records, high_watermark)) => {
+                            let record_count = records.len();
+                            debug!(
+                                "Fetched {} records from {}, high_watermark: {}",
+                                record_count, topic_clone, high_watermark
+                            );
 
-                            debug!("Key length: {}, Payload length: {}, Headers: {}",
-                                key_len, value_len, headers_count);
+                            for record in &records {
+                                let offset = record.offset;
 
-                            // Try to parse as Debezium format
-                            if let Some(payload) = &record.record.value {
-                                if let Ok(debezium) = serde_json::from_slice::<DebeziumFormat>(payload) {
-                                    let source_table = format!("{}.{}", debezium.source.db, debezium.source.table);
+                                info!(
+                                    "Kafka message: topic={}, partition={}, offset={}",
+                                    topic_clone, partition, offset
+                                );
 
-                                    // Use route config if available, otherwise use same table
-                                    let route = RouteInfo::new(source_table.clone(), source_table);
-                                    let msg = PipelineMessage::with_single_route(debezium, route);
+                                let key_len = record
+                                    .record
+                                    .key
+                                    .as_ref()
+                                    .map(|k: &Vec<u8>| k.len())
+                                    .unwrap_or(0);
+                                let value_len = record
+                                    .record
+                                    .value
+                                    .as_ref()
+                                    .map(|v: &Vec<u8>| v.len())
+                                    .unwrap_or(0);
 
-                                    if let Err(e) = sender.try_send(msg) {
-                                        error!("Failed to send message to pipeline: {}", e);
+                                debug!("Key length: {}, Payload length: {}", key_len, value_len);
+
+                                // Try to parse as Debezium format
+                                if let Some(payload) = &record.record.value {
+                                    if let Ok(debezium) =
+                                        serde_json::from_slice::<DebeziumFormat>(payload)
+                                    {
+                                        // Use source_table from debezium as the topic name
+                                        let source_table = format!(
+                                            "{}.{}",
+                                            debezium.source.db, debezium.source.table
+                                        );
+
+                                        let route =
+                                            RouteInfo::new(source_table.clone(), source_table);
+                                        let msg =
+                                            PipelineMessage::with_single_route(debezium, route);
+
+                                        if let Err(e) = sender_clone.try_send(msg) {
+                                            error!("Failed to send message to pipeline: {}", e);
+                                        } else {
+                                            debug!("Message sent to pipeline successfully");
+                                        }
                                     } else {
-                                        debug!("Message sent to pipeline successfully");
+                                        warn!(
+                                            "Received non-Debezium message from {}, skipping",
+                                            topic_clone
+                                        );
                                     }
                                 } else {
-                                    warn!("Received non-Debezium message, skipping. Payload: {}",
-                                        String::from_utf8_lossy(payload));
+                                    warn!(
+                                        "Received message with null payload from {}, skipping",
+                                        topic_clone
+                                    );
                                 }
-                            } else {
-                                warn!("Received message with null payload, skipping");
+
+                                current_offset = offset + 1;
                             }
 
-                            current_offset = offset + 1;
+                            // Update to high watermark if no new records
+                            if record_count == 0 && current_offset < high_watermark {
+                                current_offset = high_watermark;
+                            }
                         }
+                        Err(e) => {
+                            error!("Error fetching records from {}: {}", topic_clone, e);
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
 
-                        // Update to high watermark if no new records
-                        if record_count == 0 && current_offset < high_watermark {
-                            current_offset = high_watermark;
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error fetching records from Kafka: {}", e);
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
+                    // Small delay to avoid tight loop when no new messages
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 
-                // Small delay to avoid tight loop when no new messages
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-
-            info!("Kafka consumer loop stopped");
-        });
+                info!("Kafka consumer loop stopped for topic: {}", topic_clone);
+            });
+        }
 
         Ok(())
     }
@@ -175,7 +260,7 @@ impl Source for KafkaSource {
             return Ok(());
         }
 
-        info!("Starting Kafka source for topic: {}", self.config.topic);
+        info!("Starting Kafka source (without config)");
 
         if self.sender.is_none() {
             return Err("Sender not set. Call set_sender() before start()".into());
@@ -183,10 +268,33 @@ impl Source for KafkaSource {
 
         self.running.store(true, Ordering::Relaxed);
 
-        // Start consuming messages in background
+        info!(
+            "Kafka source started successfully (use start_with_config to enable route-based consumption)"
+        );
+        Ok(())
+    }
+
+    async fn start_with_config(
+        &mut self,
+        config: &Config,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_running_inner() {
+            info!("Kafka source is already running");
+            return Ok(());
+        }
+
+        info!("Starting Kafka source with config");
+
+        if self.sender.is_none() {
+            return Err("Sender not set. Call set_sender() before start()".into());
+        }
+
+        self.running.store(true, Ordering::Relaxed);
+
+        // Start consuming messages from routes
         self.consume_messages().await?;
 
-        info!("Kafka source started successfully");
+        info!("Kafka source started successfully with route-based topics");
         Ok(())
     }
 
@@ -223,17 +331,13 @@ mod tests {
     fn test_default_config() {
         let config = KafkaSourceConfig::default();
         assert_eq!(config.brokers, vec!["localhost:9092"]);
-        assert_eq!(config.topic, "default-topic");
-        assert_eq!(config.partition, 0);
+        assert_eq!(config.partition, 3);
         assert_eq!(config.start_offset, "latest");
     }
 
     #[test]
     fn test_kafka_source_creation() {
-        let source = KafkaSource::new(
-            vec!["localhost:9092".to_string()],
-            "test-topic".to_string(),
-        );
+        let source = KafkaSource::new(vec!["localhost:9092".to_string()]);
         assert!(!source.is_running());
     }
 }

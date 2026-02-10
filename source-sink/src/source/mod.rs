@@ -12,13 +12,21 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait Source: Send + Sync {
-    async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+    async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
 
-    async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+    async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
 
     fn is_running(&self) -> bool;
 
     fn set_sender(&mut self, sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>);
+
+    async fn start_with_config(&mut self, _config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error>> {
+        self.start().await
+    }
 }
 
 /// Type-erased source wrapper
@@ -48,5 +56,9 @@ impl Source for BoxSource {
 
     fn set_sender(&mut self, sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>) {
         self.inner.set_sender(sender);
+    }
+
+    async fn start_with_config(&mut self, config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error>> {
+        self.inner.start_with_config(config).await
     }
 }

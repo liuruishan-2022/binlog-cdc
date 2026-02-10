@@ -60,4 +60,8 @@ impl Source for FileSource {
     fn set_sender(&mut self, _sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>) {
         // File source doesn't use sender in current implementation
     }
+
+    async fn start_with_config(&mut self, _config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error>> {
+        self.start().await
+    }
 }

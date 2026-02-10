@@ -25,6 +25,8 @@ where
     running: Arc<AtomicBool>,
 
     name: String,
+
+    config: Option<Arc<Config>>,
 }
 
 impl<S, SINK> Pipeline<S, SINK>
@@ -39,11 +41,17 @@ where
             tx: None,
             running: Arc::new(AtomicBool::new(false)),
             name,
+            config: None,
         }
     }
 
     pub fn new_single(name: String, source: S, sink: SINK) -> Self {
         Self::new(name, source, vec![sink])
+    }
+
+    pub fn with_config(mut self, config: Arc<Config>) -> Self {
+        self.config = Some(config);
+        self
     }
 
     pub fn is_running(&self) -> bool {
@@ -68,7 +76,14 @@ where
 
         let mut source = self.source.take().ok_or("Source already consumed")?;
         source.set_sender(tx_clone);
-        source.start().await?;
+
+        // Start source with config if available
+        if let Some(config) = self.config.clone() {
+            source.start_with_config(&config).await?;
+        } else {
+            source.start().await?;
+        }
+
         info!("Pipeline '{}': source started", self.name);
 
         for sink in &mut self.sinks {

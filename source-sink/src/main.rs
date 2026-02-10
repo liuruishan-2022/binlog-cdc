@@ -3,6 +3,7 @@ use source_sink::config::{load_config, source, sink};
 use source_sink::pipeline::Pipeline;
 use source_sink::source::BoxSource;
 use source_sink::sink::BoxSink;
+use std::sync::Arc;
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -23,6 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Loading config from: {}", args.config);
 
     let config = load_config(&args.config);
+    let config_arc = Arc::new(config.clone());
 
     let source = create_source(&config.source)?;
     let sink = create_sink(&config.sink)?;
@@ -33,7 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "Default Pipeline".to_string());
 
     info!("Creating pipeline: {}", pipeline_name);
-    let mut pipeline = Pipeline::new_single(pipeline_name, source, sink);
+    let mut pipeline = Pipeline::new_single(pipeline_name, source, sink)
+        .with_config(config_arc);
 
     info!("Starting pipeline...");
     pipeline.start().await?;
@@ -57,10 +60,9 @@ fn create_source(config: &source::SourceConfig) -> Result<BoxSource, Box<dyn std
             Ok(BoxSource::new(Box::new(source_sink::source::kafka::KafkaSource::with_config(
                 source_sink::source::kafka::KafkaSourceConfig {
                     brokers: cfg.bootstrap_servers.clone(),
-                    topic: cfg.topic.clone().unwrap_or_default(),
-                    partition: cfg.partition.unwrap_or(0),
                     group_id: Some(cfg.group_id.clone()),
                     start_offset: cfg.start_offset.clone(),
+                    partition: 3,
                 },
             ))))
         }

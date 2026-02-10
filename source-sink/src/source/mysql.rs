@@ -248,6 +248,10 @@ impl Source for MySqlSource {
         // MySQL source doesn't use sender in current implementation
         // Messages are handled via row_handler callback
     }
+
+    async fn start_with_config(&mut self, _config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error>> {
+        self.start().await
+    }
 }
 
 #[cfg(test)]
