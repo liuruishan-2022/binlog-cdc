@@ -1,0 +1,20 @@
+# Console Debug Configuration
+#
+# This configuration is useful for debugging - reads from Kafka and outputs to console.
+
+source:
+  type: kafka
+  name: kafka_source
+  properties.bootstrap.servers:
+    - localhost:9092
+  properties.group.id: debug-consumer
+  topic: test-topic
+  partition: 0
+
+sink:
+  type: console
+  name: console_sink
+
+pipeline:
+  name: Debug Pipeline
+  parallelism: 1

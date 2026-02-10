@@ -1,0 +1,1 @@
+//! File-based sink implementation

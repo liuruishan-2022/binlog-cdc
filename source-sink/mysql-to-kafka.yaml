@@ -1,0 +1,38 @@
+# MySQL to Kafka Configuration with Route
+#
+# This configuration demonstrates polling data from MySQL and sending to Kafka
+# with table routing mapping.
+
+source:
+  # MySQL poll-based source
+  type: mysql
+  name: mysql_source
+  connection.url: mysql://root:password@localhost:3306/app_db
+  query: SELECT * FROM orders WHERE updated_at > NOW() - INTERVAL 5 MINUTE
+  poll.interval.secs: 5
+  pool.max.connections: 5
+  connect.timeout.secs: 30
+
+sink:
+  # Kafka sink
+  type: kafka
+  name: kafka_sink
+  properties.bootstrap.servers:
+    - localhost:9092
+  properties.compression.type: lz4
+  topic: orders-cdc
+  properties.acks: 1
+  properties.batch.size: 16384
+  properties.linger.ms: 10
+
+pipeline:
+  name: MySQL to Kafka Pipeline
+  parallelism: 4
+
+route:
+  - source-table: app_db.orders
+    sink-table: kafka_ods_orders
+  - source-table: app_db.shipments
+    sink-table: kafka_ods_shipments
+  - source-table: app_db.products
+    sink-table: kafka_ods_products
