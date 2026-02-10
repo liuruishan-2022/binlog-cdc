@@ -31,9 +31,11 @@ pub struct KafkaSourceConfig {
     #[serde(rename = "properties.group.id")]
     pub group_id: String,
 
-    pub topic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
 
-    pub partition: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partition: Option<i32>,
 
     #[serde(default = "default_start_offset")]
     pub start_offset: String,
@@ -48,8 +50,8 @@ impl KafkaSourceConfig {
         name: String,
         bootstrap_servers: Vec<String>,
         group_id: String,
-        topic: String,
-        partition: i32,
+        topic: Option<String>,
+        partition: Option<i32>,
     ) -> Self {
         Self {
             name,

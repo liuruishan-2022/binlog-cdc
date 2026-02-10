@@ -2,6 +2,7 @@
 //!
 //! This module provides abstractions and implementations for various data sources.
 
+pub mod console;
 pub mod file;
 pub mod kafka;
 pub mod mysql;
@@ -15,4 +16,30 @@ pub trait Source: Send + Sync {
     async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 
     fn is_running(&self) -> bool;
+}
+
+/// Type-erased source wrapper
+pub struct BoxSource {
+    inner: Box<dyn Source + Send + Sync>,
+}
+
+impl BoxSource {
+    pub fn new(inner: Box<dyn Source + Send + Sync>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl Source for BoxSource {
+    async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.inner.start().await
+    }
+
+    async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.inner.stop().await
+    }
+
+    fn is_running(&self) -> bool {
+        self.inner.is_running()
+    }
 }

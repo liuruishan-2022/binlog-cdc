@@ -1,4 +1,4 @@
-//! File-based source implementation
+//! Console source implementation
 
 use crate::source::Source;
 use async_trait::async_trait;
@@ -6,17 +6,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::info;
 
-pub struct FileSource {
+pub struct ConsoleSource {
     name: String,
-    path: String,
     running: Arc<AtomicBool>,
 }
 
-impl FileSource {
-    pub fn new(name: String, path: String) -> Self {
+impl ConsoleSource {
+    pub fn new(name: String) -> Self {
         Self {
             name,
-            path,
             running: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -27,28 +25,28 @@ impl FileSource {
 }
 
 #[async_trait]
-impl Source for FileSource {
+impl Source for ConsoleSource {
     async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.is_running_inner() {
-            info!("File source is already running");
+            info!("Console source is already running");
             return Ok(());
         }
 
-        info!("Starting file source: {} from {}", self.name, self.path);
+        info!("Starting console source: {}", self.name);
         self.running.store(true, Ordering::Relaxed);
-        info!("File source started (placeholder implementation)");
+        info!("Console source started (placeholder implementation)");
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if !self.is_running_inner() {
-            info!("File source is not running");
+            info!("Console source is not running");
             return Ok(());
         }
 
-        info!("Stopping file source");
+        info!("Stopping console source");
         self.running.store(false, Ordering::Relaxed);
-        info!("File source stopped");
+        info!("Console source stopped");
         Ok(())
     }
 
