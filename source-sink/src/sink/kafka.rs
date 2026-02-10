@@ -132,7 +132,7 @@ impl Sink for KafkaSink {
         self.flush().await?;
 
         self.running.store(false, Ordering::Relaxed);
-        self.producer = None;
+        self.partition_client = None;
         self.client = None;
 
         info!("Kafka sink stopped");
