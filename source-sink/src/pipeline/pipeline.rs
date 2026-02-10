@@ -63,9 +63,11 @@ where
         info!("Starting pipeline '{}'", self.name);
 
         let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let tx_clone = tx.clone();
         self.tx = Some(tx);
 
         let mut source = self.source.take().ok_or("Source already consumed")?;
+        source.set_sender(tx_clone);
         source.start().await?;
         info!("Pipeline '{}': source started", self.name);
 
@@ -197,6 +199,10 @@ mod tests {
 
         fn is_running(&self) -> bool {
             self.running.load(Ordering::Relaxed)
+        }
+
+        fn set_sender(&mut self, _sender: mpsc::Sender<PipelineMessage>) {
+            // Mock source doesn't use sender
         }
     }
 

@@ -8,6 +8,7 @@ pub mod kafka;
 pub mod mysql;
 
 use async_trait::async_trait;
+use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait Source: Send + Sync {
@@ -16,6 +17,8 @@ pub trait Source: Send + Sync {
     async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 
     fn is_running(&self) -> bool;
+
+    fn set_sender(&mut self, sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>);
 }
 
 /// Type-erased source wrapper
@@ -41,5 +44,9 @@ impl Source for BoxSource {
 
     fn is_running(&self) -> bool {
         self.inner.is_running()
+    }
+
+    fn set_sender(&mut self, sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>) {
+        self.inner.set_sender(sender);
     }
 }

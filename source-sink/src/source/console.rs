@@ -4,6 +4,7 @@ use crate::source::Source;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::info;
 
 pub struct ConsoleSource {
@@ -52,5 +53,9 @@ impl Source for ConsoleSource {
 
     fn is_running(&self) -> bool {
         self.is_running_inner()
+    }
+
+    fn set_sender(&mut self, _sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>) {
+        // Console source doesn't use sender in current implementation
     }
 }

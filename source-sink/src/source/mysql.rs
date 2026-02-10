@@ -9,6 +9,7 @@ use sqlx::mysql::MySqlPoolOptions;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
@@ -241,6 +242,11 @@ impl Source for MySqlSource {
 
     fn is_running(&self) -> bool {
         self.is_running_inner()
+    }
+
+    fn set_sender(&mut self, _sender: mpsc::Sender<crate::pipeline::message::PipelineMessage>) {
+        // MySQL source doesn't use sender in current implementation
+        // Messages are handled via row_handler callback
     }
 }
 
