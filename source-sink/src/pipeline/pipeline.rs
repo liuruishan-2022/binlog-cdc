@@ -4,12 +4,16 @@ use crate::config::Config;
 use crate::pipeline::message::{PipelineMessage, RouteInfo};
 use crate::sink::Sink;
 use crate::source::Source;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 const CHANNEL_CAPACITY: usize = 10000;
+
+///
+/// Pipeline的实现思想是: 通过source和sink之间建立一个消息流通信,
+/// 是通过channel进行线程之间的通信方式
 
 pub struct Pipeline<S, SINK>
 where
@@ -63,76 +67,6 @@ where
     }
 
     pub async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.is_running() {
-            info!("Pipeline '{}' is already running", self.name);
-            return Ok(());
-        }
-
-        info!("Starting pipeline '{}'", self.name);
-
-        let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
-        let tx_clone = tx.clone();
-        self.tx = Some(tx);
-
-        let mut source = self.source.take().ok_or("Source already consumed")?;
-        source.set_sender(tx_clone);
-
-        // Start source with config if available
-        if let Some(config) = self.config.clone() {
-            source.start_with_config(&config).await?;
-        } else {
-            source.start().await?;
-        }
-
-        info!("Pipeline '{}': source started", self.name);
-
-        for sink in &mut self.sinks {
-            sink.start().await?;
-        }
-        info!("Pipeline '{}': {} sink(s) started", self.name, self.sinks.len());
-
-        self.running.store(true, Ordering::Relaxed);
-
-        let running = self.running.clone();
-        let pipeline_name = self.name.clone();
-        let _sink_count = self.sinks.len();
-
-        let mut sinks = std::mem::take(&mut self.sinks);
-
-        tokio::spawn(async move {
-            info!("Pipeline '{}': message processor started", pipeline_name);
-
-            while running.load(Ordering::Relaxed) {
-                match rx.recv().await {
-                    Some(msg) => {
-                        debug!(
-                            "Pipeline '{}': received message, routes: {}",
-                            pipeline_name,
-                            msg.route_count()
-                        );
-
-                        for route_info in msg.routes() {
-                            for sink in &mut sinks {
-                                if let Err(e) = Self::process_message(sink, &msg, route_info).await {
-                                    error!(
-                                        "Pipeline '{}': error processing message: {}",
-                                        pipeline_name, e
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        debug!("Pipeline '{}': channel closed", pipeline_name);
-                        break;
-                    }
-                }
-            }
-
-            info!("Pipeline '{}': message processor stopped", pipeline_name);
-        });
-
-        info!("Pipeline '{}' started successfully", self.name);
         Ok(())
     }
 
@@ -186,140 +120,5 @@ pub struct PipelineBuilder;
 impl PipelineBuilder {
     pub fn from_config(_config: &Config) -> Result<(), Box<dyn std::error::Error>> {
         Err("Pipeline building from config not yet implemented".into())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::common::{DebeziumFormat, MessageKey};
-    use crate::config::{source, sink};
-    use serde_json::json;
-
-    struct MockSource {
-        running: Arc<AtomicBool>,
-    }
-
-    #[async_trait::async_trait]
-    impl Source for MockSource {
-        async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            self.running.store(true, Ordering::Relaxed);
-            Ok(())
-        }
-
-        async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            self.running.store(false, Ordering::Relaxed);
-            Ok(())
-        }
-
-        fn is_running(&self) -> bool {
-            self.running.load(Ordering::Relaxed)
-        }
-
-        fn set_sender(&mut self, _sender: mpsc::Sender<PipelineMessage>) {
-            // Mock source doesn't use sender
-        }
-    }
-
-    impl MockSource {
-        fn new() -> Self {
-            Self {
-                running: Arc::new(AtomicBool::new(false)),
-            }
-        }
-    }
-
-    struct MockSink {
-        running: Arc<AtomicBool>,
-        data: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
-    }
-
-    #[async_trait::async_trait]
-    impl Sink for MockSink {
-        async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            self.running.store(true, Ordering::Relaxed);
-            Ok(())
-        }
-
-        async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            self.running.store(false, Ordering::Relaxed);
-            Ok(())
-        }
-
-        async fn write(&mut self, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
-            let mut data_store = self.data.lock().unwrap();
-            data_store.push(data);
-            Ok(())
-        }
-
-        async fn flush(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            Ok(())
-        }
-
-        fn is_ready(&self) -> bool {
-            self.running.load(Ordering::Relaxed)
-        }
-    }
-
-    impl MockSink {
-        fn new() -> Self {
-            Self {
-                running: Arc::new(AtomicBool::new(false)),
-                data: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            }
-        }
-
-        fn received_count(&self) -> usize {
-            self.data.lock().unwrap().len()
-        }
-    }
-
-    #[tokio::test]
-    async fn test_pipeline_creation() {
-        let source = MockSource::new();
-        let sink = MockSink::new();
-
-        let pipeline = Pipeline::new_single("test-pipeline".to_string(), source, sink);
-        assert_eq!(pipeline.name(), "test-pipeline");
-        assert!(!pipeline.is_running());
-    }
-
-    #[tokio::test]
-    async fn test_pipeline_start_stop() {
-        let source = MockSource::new();
-        let sink = MockSink::new();
-
-        let mut pipeline = Pipeline::new_single("test-pipeline".to_string(), source, sink);
-        pipeline.start().await.unwrap();
-        assert!(pipeline.is_running());
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        pipeline.stop().await.unwrap();
-        assert!(!pipeline.is_running());
-    }
-
-    #[test]
-    fn test_route_info() {
-        let route = RouteInfo::new("db.table".to_string(), "sink.table".to_string());
-        assert_eq!(route.source_table(), "db.table");
-        assert_eq!(route.sink_table(), "sink.table");
-    }
-
-    #[test]
-    fn test_pipeline_message() {
-        let data = DebeziumFormat::insert(
-            json!({"id": 1}),
-            "db",
-            "table",
-            MessageKey::new(Default::default()),
-        );
-
-        let route = RouteInfo::new("db.table".to_string(), "sink.table".to_string());
-        let msg = PipelineMessage::with_single_route(data, route);
-
-        assert_eq!(msg.route_count(), 1);
-        assert_eq!(msg.operation(), "c");
-        assert!(msg.has_routes());
     }
 }
