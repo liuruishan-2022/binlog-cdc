@@ -13,7 +13,7 @@ pub async fn parse_binlog(file: &str) {
     match parser.check_magic(&mut file) {
         Ok(_) => loop {
             match parser.next(&mut file) {
-                Ok((header, data)) => {
+                Ok((_header, _data)) => {
                     count = count + 1;
                     if count % 1000000 == 0 {
                         info!("成功解析:{count}条binlog数据的event");

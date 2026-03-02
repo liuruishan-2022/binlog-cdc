@@ -2,23 +2,14 @@
 //!
 //! Provides high-performance Kafka consumer using rskafka.
 
-use crate::common::DebeziumFormat;
-use crate::config::Config;
-use crate::pipeline::message::{PipelineMessage, RouteInfo};
 use crate::source::Source;
-use async_trait::async_trait;
 use rskafka::client::partition::PartitionClient;
-use rskafka::client::partition::UnknownTopicHandling;
 use rskafka::client::{Client, ClientBuilder};
 use rskafka::topic::Topic;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::time::Duration;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use std::sync::atomic::AtomicI64;
 
 #[derive(Debug, Clone)]
 pub struct KafkaSourceConfig {
