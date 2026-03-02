@@ -3,7 +3,7 @@
 //! Provides high-performance Kafka consumer using rskafka.
 
 use crate::source::Source;
-use rskafka::client::partition::PartitionClient;
+use rskafka::client::partition::{PartitionClient, UnknownTopicHandling};
 use rskafka::client::{Client, ClientBuilder};
 use rskafka::topic::Topic;
 use std::collections::HashMap;
@@ -35,10 +35,13 @@ pub struct TopicClient {
     pub current_offset: Arc<AtomicI64>,
 }
 
+type TopicClients = HashMap<String, TopicClient>;
+
 /// Kafka source implementation with multi-topic support
 pub struct KafkaSource {
     client: Client,
     topic_metadatas: HashMap<String, Topic>,
+    partition_clients: Option<TopicClients>,
 }
 
 impl KafkaSource {
@@ -56,6 +59,7 @@ impl KafkaSource {
         return KafkaSource {
             client: client,
             topic_metadatas: topic_metadatas,
+            partition_clients: None,
         };
     }
 
@@ -68,6 +72,15 @@ impl KafkaSource {
             acc.entry(topic.name.clone()).or_insert(topic);
             acc
         });
+    }
+
+    async fn consumer(&self) {
+        let partition_client = self
+            .client
+            .partition_client("kafka-press", 0, UnknownTopicHandling::Retry)
+            .await
+            .expect("create partition client error...");
+        partition_client.fetch_records(offset, bytes, max_wait_ms)
     }
 }
 

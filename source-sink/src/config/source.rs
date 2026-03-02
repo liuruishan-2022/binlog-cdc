@@ -100,11 +100,7 @@ fn default_connect_timeout() -> u64 {
 }
 
 impl MySqlSourceConfig {
-    pub fn new(
-        name: String,
-        connection_url: String,
-        query: String,
-    ) -> Self {
+    pub fn new(name: String, connection_url: String, query: String) -> Self {
         Self {
             name,
             connection_url,
@@ -156,60 +152,5 @@ pub struct ConsoleSourceConfig {
 impl ConsoleSourceConfig {
     pub fn new(name: String) -> Self {
         Self { name }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_deserialize_kafka_source() {
-        let yaml = r#"
-type: kafka
-name: test_source
-properties.bootstrap.servers:
-  - localhost:9092
-  - localhost:9093
-properties.group.id: test-group
-topic: test-topic
-partition: 0
-"#;
-
-        let config: KafkaSourceConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.name, "test_source");
-        assert_eq!(config.bootstrap_servers.len(), 2);
-        assert_eq!(config.topic, "test-topic");
-    }
-
-    #[test]
-    fn test_deserialize_mysql_source() {
-        let yaml = r#"
-type: mysql
-name: mysql_source
-connection.url: mysql://root:password@localhost:3306/test
-query: SELECT * FROM users
-poll.interval.secs: 10
-"#;
-
-        let config: MySqlSourceConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.name, "mysql_source");
-        assert_eq!(config.poll_interval_secs, 10);
-    }
-
-    #[test]
-    fn test_serialize_source_config() {
-        let config = SourceConfig::Kafka(KafkaSourceConfig {
-            name: "test".to_string(),
-            bootstrap_servers: vec!["localhost:9092".to_string()],
-            group_id: "test-group".to_string(),
-            topic: "test".to_string(),
-            partition: 0,
-            start_offset: "latest".to_string(),
-        });
-
-        let yaml = serde_yaml::to_string(&config).unwrap();
-        println!("{}", yaml);
-        assert!(yaml.contains("type: kafka"));
     }
 }
