@@ -10,7 +10,9 @@ use async_trait::async_trait;
 use rskafka::client::partition::PartitionClient;
 use rskafka::client::partition::UnknownTopicHandling;
 use rskafka::client::{Client, ClientBuilder};
+use rskafka::topic::Topic;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
@@ -45,6 +47,7 @@ pub struct TopicClient {
 /// Kafka source implementation with multi-topic support
 pub struct KafkaSource {
     client: Client,
+    topic_metadatas: HashMap<String, Topic>,
 }
 
 impl KafkaSource {
@@ -57,11 +60,56 @@ impl KafkaSource {
             .build()
             .await
             .expect("Failed to create kafka client");
+        let topic_metadatas = KafkaSource::load_metadata(&client).await;
 
-        return KafkaSource { client: client };
+        return KafkaSource {
+            client: client,
+            topic_metadatas: topic_metadatas,
+        };
+    }
+
+    async fn load_metadata(client: &Client) -> HashMap<String, Topic> {
+        let topics = client
+            .list_topics()
+            .await
+            .expect("failed to load topics metadata...");
+        return topics.into_iter().fold(HashMap::new(), |mut acc, topic| {
+            acc.entry(topic.name.clone()).or_insert(topic);
+            acc
+        });
+    }
+}
+
+impl Display for KafkaSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KafkaSource:{:?}", self.topic_metadatas)
     }
 }
 
 ///
 /// 实现Source这个trait,提供Kafka的基本的操作
 impl Source for KafkaSource {}
+
+#[cfg(test)]
+mod tests {
+    use tracing::info;
+    use tracing_subscriber::fmt;
+
+    use crate::source::kafka::KafkaSource;
+
+    fn init() {
+        fmt()
+            .with_line_number(true)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .init();
+    }
+
+    #[tokio::test]
+    async fn test_load_metadata() {
+        init();
+        let connections = "172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092";
+        let kafka = KafkaSource::create(connections).await;
+        info!("KafkaSource metadata: {}", kafka);
+    }
+}

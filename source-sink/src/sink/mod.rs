@@ -2,9 +2,6 @@
 //!
 //! This module provides abstractions and implementations for various data sinks.
 
-pub mod console;
-pub mod file;
-pub mod kafka;
 pub mod mysql;
 
 use async_trait::async_trait;
