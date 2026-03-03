@@ -1,14 +1,7 @@
 //! Pipeline implementation
 
-use crate::config::Config;
-use crate::pipeline::message::{PipelineMessage, RouteInfo};
-use crate::sink::Sink;
 use crate::source::Source;
 use crate::source::kafka::KafkaSource;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
 
 ///
 /// Pipeline的实现思想是: 通过source和sink之间建立一个消息流通信,
