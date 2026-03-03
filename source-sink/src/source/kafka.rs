@@ -4,13 +4,6 @@
 
 use crate::source::Source;
 use kafka::consumer::Consumer;
-use rskafka::client::partition::{PartitionClient, UnknownTopicHandling};
-use rskafka::client::{Client, ClientBuilder};
-use rskafka::topic::Topic;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 use tracing::info;
 
