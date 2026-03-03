@@ -6,4 +6,6 @@ pub mod kafka;
 
 ///
 /// 提供一个Source的trait,定义基本的数据源操作
-pub trait Source {}
+pub trait Source {
+    fn consumer(&mut self);
+}

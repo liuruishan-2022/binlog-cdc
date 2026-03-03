@@ -18,3 +18,4 @@ serde_yaml = "0.9"
 url = "2.5"
 moka = { version = "0.12", features = ["future"] }
 futures-util = "0.3"
+kafka = "0.10.0"
