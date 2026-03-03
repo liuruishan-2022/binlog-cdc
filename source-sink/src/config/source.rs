@@ -26,7 +26,7 @@ pub struct KafkaSourceConfig {
     pub name: String,
 
     #[serde(rename = "properties.bootstrap.servers")]
-    pub bootstrap_servers: Vec<String>,
+    pub bootstrap_servers: String,
 
     #[serde(rename = "properties.group.id")]
     pub group_id: String,
@@ -46,25 +46,11 @@ fn default_start_offset() -> String {
 }
 
 impl KafkaSourceConfig {
-    pub fn new(
-        name: String,
-        bootstrap_servers: Vec<String>,
-        group_id: String,
-        topic: Option<String>,
-        partition: Option<i32>,
-    ) -> Self {
-        Self {
-            name,
-            bootstrap_servers,
-            group_id,
-            topic,
-            partition,
-            start_offset: default_start_offset(),
-        }
-    }
-
-    pub fn bootstrap_servers_str(&self) -> String {
-        self.bootstrap_servers.join(",")
+    pub fn bootstrap_servers(&self) -> Vec<String> {
+        self.bootstrap_servers
+            .split(',')
+            .map(|s| s.to_string())
+            .collect()
     }
 }
 
@@ -100,17 +86,6 @@ fn default_connect_timeout() -> u64 {
 }
 
 impl MySqlSourceConfig {
-    pub fn new(name: String, connection_url: String, query: String) -> Self {
-        Self {
-            name,
-            connection_url,
-            query,
-            poll_interval_secs: default_poll_interval(),
-            max_connections: default_max_connections(),
-            connect_timeout_secs: default_connect_timeout(),
-        }
-    }
-
     pub fn poll_interval(&self) -> Duration {
         Duration::from_secs(self.poll_interval_secs)
     }
@@ -134,23 +109,7 @@ fn default_read_mode() -> String {
     "read".to_string()
 }
 
-impl FileSourceConfig {
-    pub fn new(name: String, path: String) -> Self {
-        Self {
-            name,
-            path,
-            read_mode: default_read_mode(),
-        }
-    }
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ConsoleSourceConfig {
     pub name: String,
-}
-
-impl ConsoleSourceConfig {
-    pub fn new(name: String) -> Self {
-        Self { name }
-    }
 }

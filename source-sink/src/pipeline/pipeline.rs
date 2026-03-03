@@ -18,4 +18,8 @@ impl Pipeline {
             source: Box::new(source),
         }
     }
+
+    pub fn start(&mut self) {
+        self.source.consumer();
+    }
 }

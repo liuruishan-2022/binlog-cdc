@@ -2,6 +2,7 @@
 //!
 //! Provides YAML-based configuration loading for pipelines, sources, and sinks.
 
+pub mod args;
 pub mod pipeline;
 pub mod sink;
 pub mod source;
