@@ -29,7 +29,7 @@ pub struct RowEventHandler<'a> {
 }
 
 impl<'a> RowEventHandler<'a> {
-    pub fn build(config: &'a FlinkCdc, metrics: &'a Metrics, sink_stream: T) -> Self {
+    pub fn build(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
         RowEventHandler {
             kafka_sink: KafkaSink::build(config),
             metrics: metrics,
