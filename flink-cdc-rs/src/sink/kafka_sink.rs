@@ -192,8 +192,7 @@ impl RskafkaSink {
             .build()
             .await
             .expect("create rskafka client error...");
-        let producers =
-            RskafkaSink::load_metadata(&client, config.sink_topic(), config.sink_linger_ms()).await;
+        let producers = RskafkaSink::load_metadata(&client, config.sink_topic(), config).await;
 
         RskafkaSink {
             client: client,
@@ -201,7 +200,7 @@ impl RskafkaSink {
         }
     }
 
-    async fn load_metadata(client: &Client, topic: &str, linger_ms: u32) -> PartitionProducers {
+    async fn load_metadata(client: &Client, topic: &str, config: &FlinkCdc) -> PartitionProducers {
         let topics = client
             .list_topics()
             .await
@@ -225,8 +224,8 @@ impl RskafkaSink {
             let partition_client = Arc::new(partition_client);
             let producer = BatchProducerBuilder::new(partition_client)
                 .with_compression(rskafka::client::partition::Compression::Lz4)
-                .with_linger(Duration::from_millis(linger_ms as u64))
-                .build(RecordAggregator::new(10 * 1024 * 1024));
+                .with_linger(Duration::from_millis(config.sink_linger_ms() as u64))
+                .build(RecordAggregator::new(config.sink_batch_size() as usize));
             producers.insert(*partition, producer);
         }
 
