@@ -1,0 +1,38 @@
+source:
+  type: mysql
+  hostname: 172.16.1.67
+  port: 3306
+  username: root
+  password: dsap2018
+  tables: 'mostest_gsms.*'
+  server-time-zone: Asia/Shanghai
+  server-id: 5710-5716
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.006016
+  scan.startup.specific-offset.pos: 0
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: 172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092
+  properties.compression.type: lz4
+  properties.max.request.size: 41943040
+  properties.max.message.bytes: 41943040
+  topic: kafka-press
+transform:
+  - source-table: mostest_gsms.gsms_msg_pack_sms_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,sedppackstate(state) as sedp_seq_state"
+  - source-table: mostest_gsms.gsms_msg_frame_sms_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,sedpframestate(state) as sedp_seq_state"
+  - source-table: mostest_gsms.gsms_msg_pack_mms_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,sedppackstate(state) as sedp_seq_state"
+  - source-table: mostest_gsms.gsms_msg_frame_mms_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,sedpframestate(state) as sedp_seq_state"
+  - source-table: mostest_gsms.gsms_statereport_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,testperiod(enterprise_id,post_time) as is_test_period,parentchannelid(channel_id) as parent_channel_id"
+  - source-table: mostest_gsms.gsms_msg_ticket_mms_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,testperiod(enterprise_id,post_time) as is_test_period,parentchannelid(channel_id) as parent_channel_id,carrierid(channel_id) as carrier,regioncodeid(phone) as region_code_id,parentregioncodeid(phone) as parent_region_code_id,regionname(phone) as region_name,parentregionname(phone) parent_region_name,billingtype(enterprise_id) as billing_type,maskedphone(phone) as masked_phone"
+  - source-table: mostest_gsms.gsms_msg_ticket_sms_[0-9]+
+    projection: "*,LOCALTIMESTAMP as update_time,testperiod(enterprise_id,post_time) as is_test_period,parentchannelid(channel_id) as parent_channel_id,carrierid(channel_id) as carrier,regioncodeid(phone) as region_code_id,parentregioncodeid(phone) as parent_region_code_id,regionname(phone) as region_name,parentregionname(phone) parent_region_name,billingtype(enterprise_id) as billing_type,maskedphone(phone) as masked_phone"
+pipeline:
+  name: sync mos 67 mostest to kafka
+  parallelism: 2

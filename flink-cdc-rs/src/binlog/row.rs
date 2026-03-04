@@ -62,6 +62,8 @@ impl<'a> RowEventHandler<'a> {
             self.metrics
                 .inc_flink_sink_kafka_message("create", debeziums.len() as u64);
             self.send_to_kafka(debeziums).await;
+        } else {
+            warn!("table meta is not exist! table id:{}", event.table_id);
         }
     }
 
