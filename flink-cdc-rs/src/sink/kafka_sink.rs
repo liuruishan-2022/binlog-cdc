@@ -13,7 +13,11 @@ use rdkafka::{
     types::RDKafkaErrorCode,
 };
 use rskafka::{
-    client::{Client, ClientBuilder, partition::PartitionClient},
+    client::{
+        Client, ClientBuilder,
+        partition::{self, PartitionClient},
+        producer::{BatchProducer, BatchProducerBuilder, aggregator::RecordAggregator},
+    },
     record::Record,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -176,10 +180,11 @@ impl SinkStream for SpmcKafkaSink {
 ///
 
 type PartitionClients = HashMap<i32, PartitionClient>;
+type PartitionProducers = HashMap<i32, BatchProducer<RecordAggregator>>;
 
 pub struct RskafkaSink {
     client: Client,
-    partition_clients: PartitionClients,
+    partition_producers: PartitionProducers,
 }
 
 impl RskafkaSink {
@@ -188,14 +193,15 @@ impl RskafkaSink {
             .build()
             .await
             .expect("create rskafka client error...");
-        let partition_clients = RskafkaSink::load_metadata(&client, config.sink_topic()).await;
+        let producers = RskafkaSink::load_metadata(&client, config.sink_topic()).await;
+
         RskafkaSink {
             client: client,
-            partition_clients: partition_clients,
+            partition_producers: producers,
         }
     }
 
-    async fn load_metadata(client: &Client, topic: &str) -> PartitionClients {
+    async fn load_metadata(client: &Client, topic: &str) -> PartitionProducers {
         let topics = client
             .list_topics()
             .await
@@ -205,7 +211,7 @@ impl RskafkaSink {
             .find(|ele| ele.name.eq_ignore_ascii_case(topic))
             .expect(format!("topic:{} not exists!", topic).as_str());
 
-        let mut clients = PartitionClients::new();
+        let mut producers = PartitionProducers::new();
         for partition in &metadata.partitions {
             let partition_client = client
                 .partition_client(
@@ -215,39 +221,34 @@ impl RskafkaSink {
                 )
                 .await
                 .expect("failed to load partition metadata...");
-            clients.insert(*partition, partition_client);
+
+            let partition_client = Arc::new(partition_client);
+            let producer = BatchProducerBuilder::new(partition_client)
+                .with_compression(rskafka::client::partition::Compression::Lz4)
+                .with_linger(Duration::from_millis(50))
+                .build(RecordAggregator::new(10 * 1024 * 1024));
+            producers.insert(*partition, producer);
         }
 
-        return clients;
+        return producers;
     }
 
     pub async fn send_messages(&self, messages: Vec<DebeziumFormat>) {
-        let data_partitions = messages
-            .into_iter()
-            .map(|ele| {
-                let mut hasher = DefaultHasher::new();
-                ele.keys().hash(&mut hasher);
-                let hash = hasher.finish();
-                let partition = (hash % self.partition_clients.len() as u64) as i32;
-                let record = ele.into();
+        // 直接发送所有消息，BatchProducer 会自动批量积累
+        for msg in messages {
+            let mut hasher = DefaultHasher::new();
+            msg.keys().hash(&mut hasher);
+            let hash = hasher.finish();
+            let partition = (hash % self.partition_producers.len() as u64) as i32;
+            let record: Record = msg.into();
 
-                return (partition, record);
-            })
-            .fold(HashMap::new(), |mut acc, (partition, record)| {
-                acc.entry(partition).or_insert_with(Vec::new).push(record);
-                acc
-            });
-
-        for (partition, messages) in data_partitions {
-            let producer = self.partition_clients.get(&partition).unwrap();
-            if let Err(e) = producer
-                .produce(messages, rskafka::client::partition::Compression::Lz4)
-                .await
-            {
-                warn!(
-                    "failed to send messages to partition {}, error: {:?}",
-                    partition, e
-                );
+            if let Some(producer) = self.partition_producers.get(&partition) {
+                if let Err(e) = producer.produce(record).await {
+                    warn!(
+                        "failed to send message to partition {}, error: {:?}",
+                        partition, e
+                    );
+                }
             }
         }
     }
