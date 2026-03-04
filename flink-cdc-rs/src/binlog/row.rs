@@ -14,7 +14,7 @@ use tracing::warn;
 use crate::{
     binlog::{Metrics, schema::TableMeta},
     config::cdc::FlinkCdc,
-    sink::kafka_sink::KafkaSink,
+    sink::kafka_sink::{KafkaSink, RskafkaSink},
     transform::parser::ProjectionHandler,
 };
 
@@ -26,14 +26,17 @@ pub struct RowEventHandler<'a> {
     kafka_sink: KafkaSink,
     metrics: &'a Metrics,
     projection: ProjectionHandler,
+    rskafka_sink: RskafkaSink,
 }
 
 impl<'a> RowEventHandler<'a> {
-    pub fn build(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
+    pub async fn build(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
+        let rskafka_sink = RskafkaSink::create(config).await;
         RowEventHandler {
             kafka_sink: KafkaSink::build(config),
             metrics: metrics,
             projection: ProjectionHandler::create(config.transforms()),
+            rskafka_sink: rskafka_sink,
         }
     }
 
@@ -123,14 +126,14 @@ impl<'a> RowEventHandler<'a> {
     }
 
     async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
-        //TODO 最近在做两种方式的benchmark,暂时保留两种代码
-        //看到是否使用channel好像速度没有多大的区别,并且使用channel可能会造成cpu的浪费.真是奇怪了.
-        self.kafka_sink.send_batch_messages(debezium).await;
-        //self.sink_stream
-        //    .as_ref()
-        //    .unwrap()
-        //    .send_batch_messages(debezium)
-        //    .await;
+        // 根据环境变量 RSKAFKA 决定使用哪个 sink
+        // 如果设置了环境变量 RSKAFKA，则使用 rskafka_sink
+        // 否则使用传统的 kafka_sink (rdkafka)
+        if std::env::var("RSKAFKA").is_ok() {
+            self.rskafka_sink.send_messages(debezium).await;
+        } else {
+            self.kafka_sink.send_batch_messages(debezium).await;
+        }
     }
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {

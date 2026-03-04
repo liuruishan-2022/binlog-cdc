@@ -73,8 +73,7 @@ impl KafkaSource {
                 let topic_metadata = self
                     .topic_metadatas
                     .get(&topic_name)
-                    .expect("fetch topic metadata error...")
-                    .clone();
+                    .expect("fetch topic metadata error...");
 
                 for partition in topic_metadata.partitions.iter() {
                     let partition_id = partition.clone();

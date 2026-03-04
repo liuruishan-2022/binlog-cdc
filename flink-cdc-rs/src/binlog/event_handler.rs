@@ -20,7 +20,7 @@ pub struct EventHandler<'a> {
 impl<'a> EventHandler<'a> {
     pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
         let table_map_event_handler = TableMetaHandler::new(config, metrics).await;
-        let row_event_handler = RowEventHandler::build(config, metrics);
+        let row_event_handler = RowEventHandler::build(config, metrics).await;
         EventHandler {
             table_map_event_handler: table_map_event_handler,
             row_event_handler: row_event_handler,

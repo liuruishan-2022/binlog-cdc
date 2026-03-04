@@ -1,7 +1,7 @@
 FROM ubuntu:24.10
 
-COPY ./target/release/binlog-cdc /opt
+COPY ../target/release/flink-cdc-rs /opt
 
 WORKDIR /opt
 
-ENTRYPOINT ["/opt/binlog-cdc"]
+ENTRYPOINT ["/opt/flink-cdc-rs"]
