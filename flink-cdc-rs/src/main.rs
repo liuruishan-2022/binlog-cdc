@@ -19,7 +19,6 @@ use clap::Parser;
 pub mod args;
 pub mod binlog;
 pub mod config;
-pub mod pipeline;
 pub mod savepoint;
 pub mod sink;
 pub mod source;
@@ -45,7 +44,6 @@ async fn main() {
     tokio::spawn(async move {
         let config = FlinkCdc::read_from(&flink_cdc_path);
         binlog::dump_and_parse(registry_binlog, &config).await;
-        //pipeline::start_pipeline(&flink_cdc_path).await;
     });
 
     let registry_metrics = registry.clone();
