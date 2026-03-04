@@ -15,7 +15,6 @@ use rdkafka::{
 use rskafka::{
     client::{Client, ClientBuilder, partition::PartitionClient},
     record::Record,
-    topic::Topic,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{info, warn};

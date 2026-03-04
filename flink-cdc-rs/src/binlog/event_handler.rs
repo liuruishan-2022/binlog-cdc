@@ -7,7 +7,6 @@ use tracing::info;
 use crate::{
     binlog::{Metrics, row::RowEventHandler, schema::TableMetaHandler},
     config::cdc::FlinkCdc,
-    sink::kafka_sink::SpmcKafkaSink,
 };
 
 ///
