@@ -1,3 +1,7 @@
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
+
 use base64::{Engine, engine::general_purpose};
 use chrono::{Local, TimeZone, offset::LocalResult};
 use mysql_binlog_connector_rust::{

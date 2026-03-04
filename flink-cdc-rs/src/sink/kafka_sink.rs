@@ -1,14 +1,21 @@
 use std::{
+    collections::{BTreeMap, HashMap},
     hash::{DefaultHasher, Hash, Hasher},
     sync::Arc,
     time::Duration,
 };
 
+use chrono::Utc;
 use rdkafka::{
     ClientConfig,
     error::KafkaError,
     producer::{FutureProducer, FutureRecord},
     types::RDKafkaErrorCode,
+};
+use rskafka::{
+    client::{Client, ClientBuilder, partition::PartitionClient},
+    record::Record,
+    topic::Topic,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{info, warn};
@@ -160,6 +167,110 @@ impl SinkStream for SpmcKafkaSink {
                     warn!("send message error:{:?}", err);
                 }
             }
+        }
+    }
+}
+
+///
+/// 使用rskafka组件实现Kafka的消息发送,经过测试得到的结论是:
+/// rdkafka存在一定的效率问题，所以还是使用rskafka组件
+///
+
+type PartitionClients = HashMap<i32, PartitionClient>;
+
+pub struct RskafkaSink {
+    client: Client,
+    partition_clients: PartitionClients,
+}
+
+impl RskafkaSink {
+    pub async fn create(config: &FlinkCdc) -> Self {
+        let client = ClientBuilder::new(config.sink_bootstrap_servers())
+            .build()
+            .await
+            .expect("create rskafka client error...");
+        let partition_clients = RskafkaSink::load_metadata(&client, config.sink_topic()).await;
+        RskafkaSink {
+            client: client,
+            partition_clients: partition_clients,
+        }
+    }
+
+    async fn load_metadata(client: &Client, topic: &str) -> PartitionClients {
+        let topics = client
+            .list_topics()
+            .await
+            .expect("failed to load topics metadata...");
+        let metadata = topics
+            .iter()
+            .find(|ele| ele.name.eq_ignore_ascii_case(topic))
+            .expect(format!("topic:{} not exists!", topic).as_str());
+
+        let mut clients = PartitionClients::new();
+        for partition in &metadata.partitions {
+            let partition_client = client
+                .partition_client(
+                    topic,
+                    *partition,
+                    rskafka::client::partition::UnknownTopicHandling::Retry,
+                )
+                .await
+                .expect("failed to load partition metadata...");
+            clients.insert(*partition, partition_client);
+        }
+
+        return clients;
+    }
+
+    pub async fn send_messages(&self, messages: Vec<DebeziumFormat>) {
+        let data_partitions = messages
+            .into_iter()
+            .map(|ele| {
+                let mut hasher = DefaultHasher::new();
+                ele.keys().hash(&mut hasher);
+                let hash = hasher.finish();
+                let partition = (hash % self.partition_clients.len() as u64) as i32;
+                let record = ele.into();
+
+                return (partition, record);
+            })
+            .fold(HashMap::new(), |mut acc, (partition, record)| {
+                acc.entry(partition).or_insert_with(Vec::new).push(record);
+                acc
+            });
+
+        for (partition, messages) in data_partitions {
+            let producer = self.partition_clients.get(&partition).unwrap();
+            if let Err(e) = producer
+                .produce(messages, rskafka::client::partition::Compression::Lz4)
+                .await
+            {
+                warn!(
+                    "failed to send messages to partition {}, error: {:?}",
+                    partition, e
+                );
+            }
+        }
+    }
+
+    pub fn hash_code(source: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        source.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+impl From<DebeziumFormat> for Record {
+    fn from(value: DebeziumFormat) -> Self {
+        let body = value.to_json();
+        let key = value.keys();
+        let headers = BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
+
+        Record {
+            key: Some(key.into_bytes()),
+            value: Some(body.into_bytes()),
+            headers: headers,
+            timestamp: Utc::now(),
         }
     }
 }

@@ -926,6 +926,7 @@ dependencies = [
  "prometheus-client",
  "rdkafka",
  "regex",
+ "rskafka",
  "rust_decimal",
  "serde",
  "serde_json",

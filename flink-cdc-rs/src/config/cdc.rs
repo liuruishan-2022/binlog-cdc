@@ -78,6 +78,14 @@ impl FlinkCdc {
         self.sink.bootstrap_server()
     }
 
+    pub fn sink_bootstrap_servers(&self) -> Vec<String> {
+        self.sink
+            .bootstrap_server()
+            .split(',')
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>()
+    }
+
     pub fn sink_compression_type(&self) -> &str {
         self.sink.compression_type()
     }
