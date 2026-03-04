@@ -179,7 +179,6 @@ impl SinkStream for SpmcKafkaSink {
 /// rdkafka存在一定的效率问题，所以还是使用rskafka组件
 ///
 
-type PartitionClients = HashMap<i32, PartitionClient>;
 type PartitionProducers = HashMap<i32, BatchProducer<RecordAggregator>>;
 
 pub struct RskafkaSink {
@@ -193,7 +192,8 @@ impl RskafkaSink {
             .build()
             .await
             .expect("create rskafka client error...");
-        let producers = RskafkaSink::load_metadata(&client, config.sink_topic()).await;
+        let producers =
+            RskafkaSink::load_metadata(&client, config.sink_topic(), config.sink_linger_ms()).await;
 
         RskafkaSink {
             client: client,
@@ -201,7 +201,7 @@ impl RskafkaSink {
         }
     }
 
-    async fn load_metadata(client: &Client, topic: &str) -> PartitionProducers {
+    async fn load_metadata(client: &Client, topic: &str, linger_ms: u32) -> PartitionProducers {
         let topics = client
             .list_topics()
             .await
@@ -225,7 +225,7 @@ impl RskafkaSink {
             let partition_client = Arc::new(partition_client);
             let producer = BatchProducerBuilder::new(partition_client)
                 .with_compression(rskafka::client::partition::Compression::Lz4)
-                .with_linger(Duration::from_millis(50))
+                .with_linger(Duration::from_millis(linger_ms as u64))
                 .build(RecordAggregator::new(10 * 1024 * 1024));
             producers.insert(*partition, producer);
         }
