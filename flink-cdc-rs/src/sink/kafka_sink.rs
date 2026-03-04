@@ -15,7 +15,7 @@ use rdkafka::{
 use rskafka::{
     client::{
         Client, ClientBuilder,
-        partition::{self, PartitionClient},
+        partition::PartitionClient,
         producer::{BatchProducer, BatchProducerBuilder, aggregator::RecordAggregator},
     },
     record::Record,
