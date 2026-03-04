@@ -274,3 +274,9 @@ impl From<DebeziumFormat> for Record {
         }
     }
 }
+
+impl SinkStream for RskafkaSink {
+    async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
+        self.send_messages(messages).await;
+    }
+}

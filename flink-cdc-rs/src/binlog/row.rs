@@ -1,7 +1,3 @@
-use std::hash::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
-
 use base64::{Engine, engine::general_purpose};
 use chrono::{Local, TimeZone, offset::LocalResult};
 use mysql_binlog_connector_rust::{
@@ -26,36 +22,18 @@ use crate::{
 /// 处理Row相关类型的事件的
 ///
 
-pub struct RowEventHandler<'a, T>
-where
-    T: SinkStream,
-{
+pub struct RowEventHandler<'a> {
     kafka_sink: KafkaSink,
     metrics: &'a Metrics,
     projection: ProjectionHandler,
-    sink_stream: Option<T>,
 }
 
-impl<'a, T> RowEventHandler<'a, T>
-where
-    T: SinkStream,
-{
-    ///Depreacated 这块代码逻辑废弃使用,请使用下面的build方法,目前暂时对T的范型的理解不是很清楚
-    pub fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
-        RowEventHandler {
-            kafka_sink: KafkaSink::build(config),
-            metrics: metrics,
-            projection: ProjectionHandler::create(config.transforms()),
-            sink_stream: None,
-        }
-    }
-
+impl<'a> RowEventHandler<'a> {
     pub fn build(config: &'a FlinkCdc, metrics: &'a Metrics, sink_stream: T) -> Self {
         RowEventHandler {
             kafka_sink: KafkaSink::build(config),
             metrics: metrics,
             projection: ProjectionHandler::create(config.transforms()),
-            sink_stream: Some(sink_stream),
         }
     }
 
