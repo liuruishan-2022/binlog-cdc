@@ -10,3 +10,4 @@ chrono = "0.4.42"
 tikv-jemallocator = { version = "0.6", features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }
+hashbrown = "0.16"
