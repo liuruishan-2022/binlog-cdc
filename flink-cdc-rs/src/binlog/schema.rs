@@ -1,4 +1,4 @@
-use hashbrown::HashMap;
+use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
