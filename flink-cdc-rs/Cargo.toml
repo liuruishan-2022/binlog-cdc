@@ -38,9 +38,6 @@ opt-level = 0
 [profile.release]
 panic = 'abort'
 codegen-units = 1
-strip = false
-debug = 1
-lto = 'fat'
+strip = true
+lto = true
 opt-level = 3
-overflow-checks = false
-incremental = false

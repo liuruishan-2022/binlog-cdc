@@ -224,7 +224,7 @@ impl RskafkaSink {
             let producer = BatchProducerBuilder::new(partition_client)
                 .with_compression(rskafka::client::partition::Compression::Lz4)
                 .with_linger(Duration::from_millis(config.sink_linger_ms() as u64))
-                .build(RecordAggregator::new(config.sink_batch_size() as usize));
+                .build(RecordAggregator::new(10485760));
             producers.insert(*partition, producer);
         }
 
