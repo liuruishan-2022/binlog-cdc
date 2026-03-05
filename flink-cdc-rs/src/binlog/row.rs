@@ -40,95 +40,75 @@ impl<'a> RowEventHandler<'a> {
         }
     }
 
-    pub async fn handle_write_event(&self, table_meta: Option<&TableMeta>, event: WriteRowsEvent) {
-        if let Some(table_meta) = table_meta {
-            let mut rows = self.parse_rows(table_meta, event.rows);
-            let debeziums = rows
-                .iter_mut()
-                .map(|map| {
-                    self.projection
-                        .eval(&table_meta.qualified_table_name(), map);
-                    return map;
-                })
-                .map(|after| {
-                    DebeziumFormat::insert(
-                        json!(after),
-                        table_meta.db_name(),
-                        table_meta.table_name(),
-                        self.create_key(table_meta, &after),
-                    )
-                })
-                .collect::<Vec<DebeziumFormat>>();
-            self.metrics
-                .inc_flink_sink_kafka_message("create", debeziums.len() as u64);
-            self.send_to_kafka(debeziums).await;
-        } else {
-            warn!("table meta is not exist! table id:{}", event.table_id);
-        }
+    pub async fn handle_write_event(&self, table_meta: &TableMeta, event: WriteRowsEvent) {
+        let mut rows = self.parse_rows(table_meta, event.rows);
+        let debeziums = rows
+            .iter_mut()
+            .map(|map| {
+                self.projection
+                    .eval(&table_meta.qualified_table_name(), map);
+                return map;
+            })
+            .map(|after| {
+                DebeziumFormat::insert(
+                    json!(after),
+                    table_meta.db_name(),
+                    table_meta.table_name(),
+                    self.create_key(table_meta, &after),
+                )
+            })
+            .collect::<Vec<DebeziumFormat>>();
+        self.metrics
+            .inc_flink_sink_kafka_message("create", debeziums.len() as u64);
+        self.send_to_kafka(debeziums).await;
     }
 
-    pub async fn handle_update_event(
-        &self,
-        table_meta: Option<&TableMeta>,
-        event: UpdateRowsEvent,
-    ) {
-        if let Some(table_meta) = table_meta {
-            let debezium = event
-                .rows
-                .into_iter()
-                .map(|(before_row, after_row)| {
-                    return (
-                        self.convert_and_parse_row(table_meta, before_row),
-                        self.convert_and_parse_row(table_meta, after_row),
-                    );
-                })
-                .into_iter()
-                .map(|(before, mut after)| {
-                    self.projection
-                        .eval(&table_meta.qualified_table_name(), &mut after);
-                    DebeziumFormat::update(
-                        json!(before),
-                        json!(after),
-                        table_meta.db_name(),
-                        table_meta.table_name(),
-                        self.create_key(table_meta, &before),
-                    )
-                })
-                .collect::<Vec<DebeziumFormat>>();
-            self.metrics
-                .inc_flink_sink_kafka_message("update", debezium.len() as u64);
-            self.send_to_kafka(debezium).await;
-        } else {
-            warn!("table meta is not exist! table id:{}", event.table_id);
-        }
+    pub async fn handle_update_event(&self, table_meta: &TableMeta, event: UpdateRowsEvent) {
+        let debezium = event
+            .rows
+            .into_iter()
+            .map(|(before_row, after_row)| {
+                return (
+                    self.convert_and_parse_row(table_meta, before_row),
+                    self.convert_and_parse_row(table_meta, after_row),
+                );
+            })
+            .into_iter()
+            .map(|(before, mut after)| {
+                self.projection
+                    .eval(&table_meta.qualified_table_name(), &mut after);
+                DebeziumFormat::update(
+                    json!(before),
+                    json!(after),
+                    table_meta.db_name(),
+                    table_meta.table_name(),
+                    self.create_key(table_meta, &before),
+                )
+            })
+            .collect::<Vec<DebeziumFormat>>();
+        self.metrics
+            .inc_flink_sink_kafka_message("update", debezium.len() as u64);
+        self.send_to_kafka(debezium).await;
     }
 
-    pub async fn handle_delete_event(
-        &self,
-        table_meta: Option<&TableMeta>,
-        event: DeleteRowsEvent,
-    ) {
-        if let Some(table_meta) = table_meta {
-            let debezium = event
-                .rows
-                .into_iter()
-                .map(|row| self.convert_and_parse_row(table_meta, row))
-                .into_iter()
-                .map(|before| {
-                    DebeziumFormat::delete(
-                        json!(before),
-                        table_meta.db_name(),
-                        table_meta.table_name(),
-                        self.create_key(table_meta, &before),
-                    )
-                })
-                .collect::<Vec<DebeziumFormat>>();
-            self.metrics
-                .inc_flink_sink_kafka_message("delete", debezium.len() as u64);
-            self.send_to_kafka(debezium).await;
-        } else {
-            warn!("table meta is not exist! table id:{}", event.table_id);
-        }
+    pub async fn handle_delete_event(&self, table_meta: &TableMeta, event: DeleteRowsEvent) {
+        let debezium = event
+            .rows
+            .into_iter()
+            .map(|row| self.convert_and_parse_row(table_meta, row))
+            .into_iter()
+            .map(|before| {
+                DebeziumFormat::delete(
+                    json!(before),
+                    table_meta.db_name(),
+                    table_meta.table_name(),
+                    self.create_key(table_meta, &before),
+                )
+            })
+            .collect::<Vec<DebeziumFormat>>();
+        self.metrics
+            .inc_flink_sink_kafka_message("delete", debezium.len() as u64);
+        self.send_to_kafka(debezium).await;
     }
 
     async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
