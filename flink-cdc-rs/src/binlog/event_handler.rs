@@ -46,22 +46,28 @@ impl<'a> EventHandler<'a> {
 
     pub async fn handle_write_rows_event(&mut self, event: WriteRowsEvent) {
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
-        self.row_event_handler
-            .handle_write_event(table_meta, event)
-            .await;
+        if let Some(table_meta) = table_meta {
+            self.row_event_handler
+                .handle_write_event(table_meta, event)
+                .await;
+        }
     }
 
     pub async fn handle_update_rows_event(&mut self, event: UpdateRowsEvent) {
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
-        self.row_event_handler
-            .handle_update_event(table_meta, event)
-            .await;
+        if let Some(table_meta) = table_meta {
+            self.row_event_handler
+                .handle_update_event(table_meta, event)
+                .await;
+        }
     }
 
     pub async fn handle_delete_rows_event(&mut self, event: DeleteRowsEvent) {
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
-        self.row_event_handler
-            .handle_delete_event(table_meta, event)
-            .await;
+        if let Some(table_meta) = table_meta {
+            self.row_event_handler
+                .handle_delete_event(table_meta, event)
+                .await;
+        }
     }
 }
