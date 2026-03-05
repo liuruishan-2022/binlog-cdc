@@ -933,6 +933,7 @@ dependencies = [
  "serde_yaml",
  "sqlparser",
  "sqlx",
+ "tikv-jemallocator",
  "tokio",
  "tracing",
  "tracing-subscriber",
