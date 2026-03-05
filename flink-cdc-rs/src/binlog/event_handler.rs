@@ -1,8 +1,10 @@
+use std::{alloc::System, process};
+
 use mysql_binlog_connector_rust::event::{
     delete_rows_event::DeleteRowsEvent, rotate_event::RotateEvent, table_map_event::TableMapEvent,
     update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     binlog::{Metrics, row::RowEventHandler, schema::TableMetaHandler},

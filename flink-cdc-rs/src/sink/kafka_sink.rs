@@ -15,7 +15,6 @@ use rdkafka::{
 use rskafka::{
     client::{
         Client, ClientBuilder,
-        partition::PartitionClient,
         producer::{BatchProducer, BatchProducerBuilder, aggregator::RecordAggregator},
     },
     record::Record,
@@ -242,11 +241,13 @@ impl RskafkaSink {
             let record: Record = msg.into();
 
             if let Some(producer) = self.partition_producers.get(&partition) {
-                if let Err(e) = producer.produce(record).await {
-                    warn!(
-                        "failed to send message to partition {}, error: {:?}",
-                        partition, e
+                if let Ok(response) = producer.produce(record).await {
+                    info!(
+                        "send message to kafka success offset:{} partition:{}",
+                        response, partition
                     );
+                } else {
+                    warn!("Failed to produce message to kafka");
                 }
             }
         }
