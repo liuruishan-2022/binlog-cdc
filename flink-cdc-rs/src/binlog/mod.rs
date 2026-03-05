@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{sync::Arc, time};
 
 use mysql_binlog_connector_rust::{
     binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
 };
 use prometheus_client::{
     encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family},
+    metrics::{counter::Counter, family::Family, gauge::Gauge},
     registry::Registry,
 };
 use tokio::{sync::Mutex, time::sleep};
@@ -50,60 +50,64 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
     loop {
         let result = stream.read().await;
         match result {
-            Ok((_header, data)) => match data {
-                EventData::Rotate(event) => {
-                    info!("read new binlog:{}", event.binlog_filename);
-                    event_handler.handle_rotate_event(&event);
-                    savepoint.save(&event.binlog_filename);
-                    metrics.inc_flink_mysql_cdc("rotate");
+            Ok((header, data)) => {
+                //处理binlog event事件对象并且做监控
+                metrics.stat_binlog_event_timestamp(header.timestamp);
+                match data {
+                    EventData::Rotate(event) => {
+                        info!("read new binlog:{}", event.binlog_filename);
+                        event_handler.handle_rotate_event(&event);
+                        savepoint.save(&event.binlog_filename);
+                        metrics.inc_flink_mysql_cdc("rotate");
+                    }
+                    EventData::TableMap(event) => {
+                        event_handler.handle_table_map_event(&event).await;
+                        metrics.inc_flink_mysql_cdc("table-map");
+                    }
+                    EventData::WriteRows(event) => {
+                        event_handler.handle_write_rows_event(event).await;
+                        metrics.inc_flink_mysql_cdc("write-rows");
+                    }
+                    EventData::DeleteRows(event) => {
+                        event_handler.handle_delete_rows_event(event).await;
+                        metrics.inc_flink_mysql_cdc("delete-rows");
+                    }
+                    EventData::UpdateRows(event) => {
+                        event_handler.handle_update_rows_event(event).await;
+                        metrics.inc_flink_mysql_cdc("update-rows");
+                    }
+                    EventData::NotSupported => {
+                        metrics.inc_flink_mysql_cdc("not-supported");
+                    }
+                    EventData::FormatDescription(_event) => {
+                        metrics.inc_flink_mysql_cdc("format-description");
+                    }
+                    EventData::PreviousGtids(_event) => {
+                        metrics.inc_flink_mysql_cdc("previous-gtids");
+                    }
+                    EventData::Gtid(_event) => {
+                        metrics.inc_flink_mysql_cdc("gtid");
+                    }
+                    EventData::Query(_event) => {
+                        metrics.inc_flink_mysql_cdc("query");
+                    }
+                    EventData::Xid(_event) => {
+                        metrics.inc_flink_mysql_cdc("xid");
+                    }
+                    EventData::XaPrepare(_event) => {
+                        metrics.inc_flink_mysql_cdc("xa-prepare");
+                    }
+                    EventData::TransactionPayload(_event) => {
+                        metrics.inc_flink_mysql_cdc("transaction-payload");
+                    }
+                    EventData::RowsQuery(_event) => {
+                        metrics.inc_flink_mysql_cdc("rows-query");
+                    }
+                    EventData::HeartBeat => {
+                        metrics.inc_flink_mysql_cdc("heart-beat");
+                    }
                 }
-                EventData::TableMap(event) => {
-                    event_handler.handle_table_map_event(&event).await;
-                    metrics.inc_flink_mysql_cdc("table-map");
-                }
-                EventData::WriteRows(event) => {
-                    event_handler.handle_write_rows_event(event).await;
-                    metrics.inc_flink_mysql_cdc("write-rows");
-                }
-                EventData::DeleteRows(event) => {
-                    event_handler.handle_delete_rows_event(event).await;
-                    metrics.inc_flink_mysql_cdc("delete-rows");
-                }
-                EventData::UpdateRows(event) => {
-                    event_handler.handle_update_rows_event(event).await;
-                    metrics.inc_flink_mysql_cdc("update-rows");
-                }
-                EventData::NotSupported => {
-                    metrics.inc_flink_mysql_cdc("not-supported");
-                }
-                EventData::FormatDescription(_event) => {
-                    metrics.inc_flink_mysql_cdc("format-description");
-                }
-                EventData::PreviousGtids(_event) => {
-                    metrics.inc_flink_mysql_cdc("previous-gtids");
-                }
-                EventData::Gtid(_event) => {
-                    metrics.inc_flink_mysql_cdc("gtid");
-                }
-                EventData::Query(_event) => {
-                    metrics.inc_flink_mysql_cdc("query");
-                }
-                EventData::Xid(_event) => {
-                    metrics.inc_flink_mysql_cdc("xid");
-                }
-                EventData::XaPrepare(_event) => {
-                    metrics.inc_flink_mysql_cdc("xa-prepare");
-                }
-                EventData::TransactionPayload(_event) => {
-                    metrics.inc_flink_mysql_cdc("transaction-payload");
-                }
-                EventData::RowsQuery(_event) => {
-                    metrics.inc_flink_mysql_cdc("rows-query");
-                }
-                EventData::HeartBeat => {
-                    metrics.inc_flink_mysql_cdc("heart-beat");
-                }
-            },
+            }
             Err(BinlogError::IoError(err)) => {
                 //在Mysql重启的时候,无法做到重新连接的操作
                 warn!(
@@ -151,6 +155,9 @@ struct KafkaLabel {
     event: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct BinlogEventLabel {}
+
 ///
 /// 整个服务的所有指标都定义在这里了
 #[derive(Debug)]
@@ -166,6 +173,10 @@ pub struct Metrics {
     ///
     /// 监控发送到kafka的消息个数
     flink_sink_kafka_message: Family<KafkaLabel, Counter>,
+
+    ///
+    /// 记录读取到的binlog event的事件戳
+    flink_mysql_binlog_event_timestamp: Family<BinlogEventLabel, Gauge<i64>>,
 }
 
 impl Metrics {
@@ -174,6 +185,7 @@ impl Metrics {
             flink_mysql_cdc: Family::default(),
             flink_mysql_desc_table: Family::default(),
             flink_sink_kafka_message: Family::default(),
+            flink_mysql_binlog_event_timestamp: Family::default(),
         }
     }
 
@@ -192,6 +204,11 @@ impl Metrics {
             "flink_sink_kafka_message",
             "flink sink kafka message send count total",
             self.flink_sink_kafka_message.clone(),
+        );
+        registry.register(
+            "flink_mysql_binlog_event_timestamp",
+            "flink mysql binlog event timestamp",
+            self.flink_mysql_binlog_event_timestamp.clone(),
         );
     }
 
@@ -216,6 +233,12 @@ impl Metrics {
                 event: event.to_string(),
             })
             .inc_by(count);
+    }
+
+    pub fn stat_binlog_event_timestamp(&self, timestamp: u32) {
+        self.flink_mysql_binlog_event_timestamp
+            .get_or_create(&BinlogEventLabel {})
+            .set(timestamp as i64);
     }
 }
 

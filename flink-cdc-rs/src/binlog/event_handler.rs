@@ -11,7 +11,12 @@ use crate::{
 
 ///
 /// 处理CDC事件的处理器
-/// 从线下的CDC的事件的类型分析，发现TABLE_MAP_EVENT事件大概占据所有事件的:50%的样子，所以如果每次都去请求表的结构，那么速度会非常的慢速
+/// 从线下的CDC的事件的类型分析，
+/// 发现TABLE_MAP_EVENT事件大概占据所有事件的:50%的样子，
+/// 所以如果每次都去请求表的结构，那么速度会非常的慢速
+/// 更正下 TABLE_MAP_EVENT事件在生产的分布情况:
+/// 大概总体的EVENT处理速度为:8w/s的时候，TABLE_MAP_EVENT大概占据了:20%的样子,
+/// 也就是1.5w/s-1.6w/s的速度，比write,delete,update事件都高
 pub struct EventHandler<'a> {
     table_map_event_handler: TableMetaHandler<'a>,
     row_event_handler: RowEventHandler<'a>,
