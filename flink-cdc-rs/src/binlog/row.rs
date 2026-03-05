@@ -98,6 +98,8 @@ impl<'a> RowEventHandler<'a> {
             self.metrics
                 .inc_flink_sink_kafka_message("update", debezium.len() as u64);
             self.send_to_kafka(debezium).await;
+        } else {
+            warn!("table meta is not exist! table id:{}", event.table_id);
         }
     }
 
@@ -124,6 +126,8 @@ impl<'a> RowEventHandler<'a> {
             self.metrics
                 .inc_flink_sink_kafka_message("delete", debezium.len() as u64);
             self.send_to_kafka(debezium).await;
+        } else {
+            warn!("table meta is not exist! table id:{}", event.table_id);
         }
     }
 

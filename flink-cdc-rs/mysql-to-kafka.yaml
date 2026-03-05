@@ -8,7 +8,7 @@ source:
   server-time-zone: Asia/Shanghai
   server-id: 5710-5716
   scan.startup.mode: specific-offset
-  scan.startup.specific-offset.file: mysql-bin.006016
+  scan.startup.specific-offset.file: mysql-bin.006023
   scan.startup.specific-offset.pos: 0
 sink:
   type: kafka

@@ -44,7 +44,3 @@ lto = 'fat'
 opt-level = 3
 overflow-checks = false
 incremental = false
-
-# 生产环境专用配置：针对特定 CPU 优化（可选，根据部署环境选择）
-# [profile.release.package."*"]
-# rustflags = ["-C", "target-cpu=native"]  # 如果在固定 CPU 环境部署，可以启用
