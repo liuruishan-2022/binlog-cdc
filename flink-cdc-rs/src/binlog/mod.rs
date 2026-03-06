@@ -1,4 +1,4 @@
-use std::{sync::Arc, time};
+use std::{error::Error, sync::Arc, time};
 
 use mysql_binlog_connector_rust::{
     binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
@@ -22,7 +22,10 @@ pub mod schema;
 
 ///
 /// 监听binlog文件，以及解析binlong文件的内容
-pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
+pub async fn dump_and_parse(
+    registry: Arc<Mutex<Registry>>,
+    config: &FlinkCdc,
+) -> Result<i32, Error> {
     let metrics = metrics(registry).await;
     let savepoint = LocalFileSystem::default();
     let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await;
@@ -136,6 +139,8 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                         }
                     }
                 }
+
+                return Err("BinlogError IoError");
             }
             Err(BinlogError::UnexpectedData(err)) => {
                 warn!(
@@ -157,9 +162,11 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                         }
                     }
                 }
+                return Err("BinlogError UnexpectedData err");
             }
             Err(err) => {
                 panic!("read mysql binlog error:{:?}", err);
+                return Err("Binlog error");
             }
         }
     }

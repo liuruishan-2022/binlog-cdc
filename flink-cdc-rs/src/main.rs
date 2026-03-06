@@ -46,7 +46,7 @@ async fn main() {
 
     tokio::spawn(async move {
         let config = FlinkCdc::read_from(&flink_cdc_path);
-        binlog::dump_and_parse(registry_binlog, &config).await;
+        let result = binlog::dump_and_parse(registry_binlog, &config).await;
     });
 
     let registry_metrics = registry.clone();
