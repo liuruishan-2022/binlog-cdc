@@ -122,3 +122,54 @@ transform 字段解释:
 | Kafka 投递速率        | 3.2w/s（3.2 万条/秒） |
 | 每日投递消息数据量    | 3.2 亿左右            |
 | 每日处理 CDC 事件个数 | 16 亿左右             |
+
+# 6. 版本信息
+
+## 1.0.0 版本
+
+1. 支持最基本的从 mysql 指定的 binlog 文件读取 CDC 数据信息写入到对应的 Kafka 的 Topic 中
+2. 支持自定义函数: LOCALTIMESTAMP,以及 "" as 或者是:-1 as 这种解析
+3. 支持最新采集的 binlog 文件名字写入到 savepoint 文件夹中
+
+## 1.1.0
+
+修复:
+
+1. 当 mysql 出现重启或者是网络出现问题的时候,支持自动的重新连接
+
+特性:
+
+1. 增加 mysql 8.0.20 的 desc xxx,获取 key 的时候的兼容支持
+
+## 1.1.1
+
+1. 处理兼容数据库名字含有 .\*#等特殊符号的情况
+
+## 1.2.0
+
+1. 支撑数据源是 Kafka--->mysql 目标的配置和功能
+
+# 7. 想法
+
+## 7.1 一些关于项目的想法
+
+1. 计划找到一个稳定的 mysql binlog 协议采集依赖,替换掉目前的 mysql-binlog-connector
+2. 计划替换掉 rdkafka 为 rskafka,我实验了下 rskafka,发现性能很好,完美的诠释了 rust 的性能指标
+
+# 问题记录
+
+## x.1 生产在跑了:几百万的 binlog 解析之后,出现了如下的报错信息:
+
+```bash
+2026-01-16 15:31:38
+2026-01-16T15:31:38.719977769+08:00 stdout F 2026-01-16T15:31:38.717  INFO binlog_cdc::sink::kafka_sink: send message ok,keys:{"TableId":"mos2_gsms.gsms_msg_pack_sms_0116","id":1461740446534438912}!
+2026-01-16 15:31:38
+2026-01-16T15:31:38.719997096+08:00 stderr F
+
+2026-01-16 15:31:38
+2026-01-16T15:31:38.720020204+08:00 stderr F thread 'tokio-runtime-worker' (7) panicked at src/binlog/mod.rs:47:50:
+2026-01-16 15:31:38
+2026-01-16T15:31:38.720029391+08:00 stderr F read mysql binlog error!: IoError(Error { kind: InvalidData, message: "stream did not contain valid UTF-8" })
+2026-01-16 15:31:38
+2026-01-16T15:31:38.720037141+08:00 stderr F note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```

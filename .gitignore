@@ -1,1 +1,20 @@
+# Rust build artifacts
 target/
+
+# Build scripts
+build.sh
+
+# Configuration files (may contain sensitive data)
+savepoints/
+test-config.yaml
+kafka-to-mysql.yaml
+config.yaml
+flink-cdc.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
