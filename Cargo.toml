@@ -11,3 +11,4 @@ tikv-jemallocator = { version = "0.6", features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }
 hashbrown = "0.16"
+thiserror = "2.0.18"

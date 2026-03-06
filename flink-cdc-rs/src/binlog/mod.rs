@@ -12,6 +12,7 @@ use tokio::{sync::Mutex, time::sleep};
 use tracing::{info, warn};
 
 use crate::{
+    common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
 };
@@ -25,7 +26,7 @@ pub mod schema;
 pub async fn dump_and_parse(
     registry: Arc<Mutex<Registry>>,
     config: &FlinkCdc,
-) -> Result<i32, Error> {
+) -> Result<i32, CdcError> {
     let metrics = metrics(registry).await;
     let savepoint = LocalFileSystem::default();
     let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await;
@@ -140,7 +141,7 @@ pub async fn dump_and_parse(
                     }
                 }
 
-                return Err("BinlogError IoError");
+                return CdcError::BinlogIo(err);
             }
             Err(BinlogError::UnexpectedData(err)) => {
                 warn!(
@@ -162,11 +163,11 @@ pub async fn dump_and_parse(
                         }
                     }
                 }
-                return Err("BinlogError UnexpectedData err");
+                return CdcError::BinlogUnexpected(err);
             }
             Err(err) => {
                 panic!("read mysql binlog error:{:?}", err);
-                return Err("Binlog error");
+                return CdcError::Other("Binlog error".to_string());
             }
         }
     }

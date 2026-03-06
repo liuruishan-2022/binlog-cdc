@@ -10,7 +10,7 @@ use axum::{
 };
 use prometheus_client::{encoding::text::encode, registry::Registry};
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 
 use crate::{args::arguments::Args, config::cdc::FlinkCdc};
@@ -18,6 +18,7 @@ use clap::Parser;
 
 pub mod args;
 pub mod binlog;
+pub mod common;
 pub mod config;
 pub mod savepoint;
 pub mod sink;
@@ -47,6 +48,13 @@ async fn main() {
     tokio::spawn(async move {
         let config = FlinkCdc::read_from(&flink_cdc_path);
         let result = binlog::dump_and_parse(registry_binlog, &config).await;
+        if result.is_err() {
+            error!("binlog error:{}", result.err().unwrap());
+            process::exit(1);
+        } else {
+            warn!("binlog read retrun,we will exit now!");
+            process::exit(0);
+        }
     });
 
     let registry_metrics = registry.clone();
