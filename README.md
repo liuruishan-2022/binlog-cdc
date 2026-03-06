@@ -173,3 +173,31 @@ transform 字段解释:
 2026-01-16 15:31:38
 2026-01-16T15:31:38.720037141+08:00 stderr F note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 ```
+
+## x.2 跑了14个小时左右出现了如下的错误问题
+
+```bash
+2026-03-06 06:43:19
+2026-03-06T06:43:19.11096448+08:00 stdout F 2026-03-06T06:43:19.110  INFO tokio-runtime-worker ThreadId(05) flink_cdc_rs::sink::kafka_sink: 69: send message ok,keys:{"TableId":"mos2_gsms.gsms_msg_pack_sms_0306","id":1479368747532791808}!
+2026-03-06 06:43:19
+2026-03-06T06:43:19.111028232+08:00 stdout F 2026-03-06T06:43:19.110  INFO tokio-runtime-worker ThreadId(05) flink_cdc_rs::sink::kafka_sink: 69: send message ok,keys:{"TableId":"mos2_gsms.gsms_msg_ticket_sms_0306","id":1479368765732161536}!
+2026-03-06 06:43:19
+2026-03-06T06:43:19.11111144+08:00 stdout F 2026-03-06T06:43:19.111  INFO tokio-runtime-worker ThreadId(05) flink_cdc_rs::sink::kafka_sink: 69: send message ok,keys:{"TableId":"mos2_gsms.gsms_msg_ticket_sms_0306","id":1479368765753131008}!
+2026-03-06 06:43:19
+2026-03-06T06:43:19.111198322+08:00 stdout F 2026-03-06T06:43:19.111  INFO tokio-runtime-worker ThreadId(05) flink_cdc_rs::sink::kafka_sink: 69: send message ok,keys:{"TableId":"mos2_gsms.gsms_msg_pack_sms_0306","id":1479368765400508416}!
+2026-03-06 06:43:51
+2026-03-06T06:43:51.582867528+08:00 stderr F
+2026-03-06 06:43:51
+2026-03-06T06:43:51.5829136+08:00 stderr F thread 'tokio-runtime-worker' (8) panicked at flink-cdc-rs/src/binlog/mod.rs:135:17:
+2026-03-06 06:43:51
+2026-03-06T06:43:51.582920488+08:00 stderr F read mysql binlog error:UnexpectedData("Read binlog header timeout after 10s while waiting for packet header")
+2026-03-06 06:43:51
+2026-03-06T06:43:51.582923589+08:00 stderr F note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-03-06 06:43:51
+2026-03-06T06:43:51.654936189+08:00 stdout F 2026-03-06T06:43:51.654  WARN tokio-runtime-worker ThreadId(03) rskafka::client::producer::broadcast: 73: BroadcastOnce dropped without producing
+
+2026-03-06 06:43:51
+2026-03-06T06:43:51.654983272+08:00 stdout F 2026-03-06T06:43:51.654  WARN tokio-runtime-worker ThreadId(03) rskafka::client::producer::broadcast: 73: BroadcastOnce dropped without producing
+2026-03-06 06:43:51
+2026-03-06T06:43:51.655051618+08:00 stdout F 2026-03-06T06:43:51.654  WARN tokio-runtime-worker ThreadId(03) rskafka::client::producer::broadcast: 73: BroadcastOnce dropped without producing
+```

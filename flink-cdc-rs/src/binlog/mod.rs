@@ -108,6 +108,12 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                     }
                 }
             }
+            //
+            // 目前生产省出现了如下的错误,需要进行重新建立连接的操作
+            // 1. IoError(Error { kind: InvalidData, message: "stream did not contain valid UTF-8" })
+            // 处理方案就是: 对BinlogError::IoError(err) 进行一个抓取处理
+            // 2. UnexpectedData("Read binlog header timeout after 10s while waiting for packet header")
+            // 目前发现生产有这个问题: 处理这个问题
             Err(BinlogError::IoError(err)) => {
                 //在Mysql重启的时候,无法做到重新连接的操作
                 warn!(
@@ -115,6 +121,27 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                     err
                 );
 
+                for index in 1..=config.source_connect_retry_times() {
+                    info!("retry to reconnection mysql times:{}!", index);
+
+                    sleep(config.source_connect_timeout()).await;
+                    match client.connect().await {
+                        Ok(re_stream) => {
+                            info!("reconnection mysql success!");
+                            stream = re_stream;
+                            break;
+                        }
+                        Err(err) => {
+                            warn!("reconnection mysql failed, error:{:?}!", err);
+                        }
+                    }
+                }
+            }
+            Err(BinlogError::UnexpectedData(err)) => {
+                warn!(
+                    "read binlog error:{} we will retry 3 times to reconnection!",
+                    err
+                );
                 for index in 1..=config.source_connect_retry_times() {
                     info!("retry to reconnection mysql times:{}!", index);
 
