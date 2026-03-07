@@ -37,7 +37,7 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
         gtid_enabled: false,
         gtid_set: "rust-123".to_string(),
         heartbeat_interval_secs: 10,
-        timeout_secs: 60,
+        timeout_secs: config.source_keep_alive_interval().as_secs(),
         keepalive_idle_secs: 60,
         keepalive_interval_secs: 60,
     };
