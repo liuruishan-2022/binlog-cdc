@@ -141,7 +141,7 @@ pub async fn dump_and_parse(
                     }
                 }
 
-                return CdcError::BinlogIo(err);
+                return Err(CdcError::BinlogIo("Binlog IoError".to_string()));
             }
             Err(BinlogError::UnexpectedData(err)) => {
                 warn!(
@@ -163,11 +163,11 @@ pub async fn dump_and_parse(
                         }
                     }
                 }
-                return CdcError::BinlogUnexpected(err);
+                return Err(CdcError::BinlogUnexpected(err));
             }
             Err(err) => {
                 panic!("read mysql binlog error:{:?}", err);
-                return CdcError::Other("Binlog error".to_string());
+                return Err(CdcError::Other("Binlog error".to_string()));
             }
         }
     }

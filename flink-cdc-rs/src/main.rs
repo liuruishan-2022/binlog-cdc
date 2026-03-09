@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{process, sync::Arc};
 
 use axum::{
     Router,
