@@ -124,23 +124,6 @@ pub async fn dump_and_parse(
                     "read binlog error:{:?} we will retry 3 times to reconnection!",
                     err
                 );
-
-                for index in 1..=config.source_connect_retry_times() {
-                    info!("retry to reconnection mysql times:{}!", index);
-
-                    sleep(config.source_connect_timeout()).await;
-                    match client.connect().await {
-                        Ok(re_stream) => {
-                            info!("reconnection mysql success!");
-                            stream = re_stream;
-                            break;
-                        }
-                        Err(err) => {
-                            warn!("reconnection mysql failed, error:{:?}!", err);
-                        }
-                    }
-                }
-
                 return Err(CdcError::BinlogIo("Binlog IoError".to_string()));
             }
             Err(BinlogError::UnexpectedData(err)) => {
@@ -148,25 +131,10 @@ pub async fn dump_and_parse(
                     "read binlog error:{} we will retry 3 times to reconnection!",
                     err
                 );
-                for index in 1..=config.source_connect_retry_times() {
-                    info!("retry to reconnection mysql times:{}!", index);
-
-                    sleep(config.source_connect_timeout()).await;
-                    match client.connect().await {
-                        Ok(re_stream) => {
-                            info!("reconnection mysql success!");
-                            stream = re_stream;
-                            break;
-                        }
-                        Err(err) => {
-                            warn!("reconnection mysql failed, error:{:?}!", err);
-                        }
-                    }
-                }
                 return Err(CdcError::BinlogUnexpected(err));
             }
             Err(err) => {
-                panic!("read mysql binlog error:{:?}", err);
+                warn!("read mysql binlog error:{:?}", err);
                 return Err(CdcError::Other("Binlog error".to_string()));
             }
         }
