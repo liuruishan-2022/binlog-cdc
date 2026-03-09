@@ -49,7 +49,7 @@ async fn main() {
         let config = FlinkCdc::read_from(&flink_cdc_path);
         let result = binlog::dump_and_parse(registry_binlog, &config).await;
         if result.is_err() {
-            error!("binlog error:{}", result.err().unwrap());
+            warn!("binlog error:{}", result.err().unwrap());
             process::exit(1);
         } else {
             warn!("binlog read retrun,we will exit now!");
