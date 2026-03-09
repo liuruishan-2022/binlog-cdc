@@ -256,11 +256,11 @@ impl Source {
     }
 
     ///
-    /// 获取 debezium keep alive interval，默认为 300 秒
+    /// 获取 debezium keep alive interval，默认为 120 秒
     fn keep_alive_interval(&self) -> Duration {
         self.keep_alive_interval_ms
             .map(Duration::from_millis)
-            .unwrap_or(Duration::from_secs(300))
+            .unwrap_or(Duration::from_secs(120))
     }
 
     ///
