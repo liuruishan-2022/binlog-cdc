@@ -43,7 +43,3 @@ strip = true
 lto = true
 opt-level = 3
 debug = true
-
-[profile.bench]
-panic = 'abort'
-debug = true
