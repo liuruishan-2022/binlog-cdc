@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc, time};
+use std::sync::Arc;
 
 use mysql_binlog_connector_rust::{
     binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
@@ -8,7 +8,7 @@ use prometheus_client::{
     metrics::{counter::Counter, family::Family, gauge::Gauge},
     registry::Registry,
 };
-use tokio::{sync::Mutex, time::sleep};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
