@@ -1,4 +1,4 @@
-use std::{sync::Arc, time};
+use std::sync::Arc;
 
 use mysql_binlog_connector_rust::{
     binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
@@ -8,10 +8,11 @@ use prometheus_client::{
     metrics::{counter::Counter, family::Family, gauge::Gauge},
     registry::Registry,
 };
-use tokio::{sync::Mutex, time::sleep};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
+    common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
 };
@@ -22,10 +23,13 @@ pub mod schema;
 
 ///
 /// 监听binlog文件，以及解析binlong文件的内容
-pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
+pub async fn dump_and_parse(
+    registry: Arc<Mutex<Registry>>,
+    config: &FlinkCdc,
+) -> Result<i32, CdcError> {
     let metrics = metrics(registry).await;
     let savepoint = LocalFileSystem::default();
-    let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await;
+    let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await?;
 
     let binlog_file = savepoint.load().unwrap_or(config.source_binlog_file());
 
@@ -37,7 +41,7 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
         gtid_enabled: false,
         gtid_set: "rust-123".to_string(),
         heartbeat_interval_secs: 10,
-        timeout_secs: 10,
+        timeout_secs: config.source_keep_alive_interval().as_secs(),
         keepalive_idle_secs: 60,
         keepalive_interval_secs: 60,
     };
@@ -108,31 +112,30 @@ pub async fn dump_and_parse(registry: Arc<Mutex<Registry>>, config: &FlinkCdc) {
                     }
                 }
             }
+            //
+            // 目前生产省出现了如下的错误,需要进行重新建立连接的操作
+            // 1. IoError(Error { kind: InvalidData, message: "stream did not contain valid UTF-8" })
+            // 处理方案就是: 对BinlogError::IoError(err) 进行一个抓取处理
+            // 2. UnexpectedData("Read binlog header timeout after 10s while waiting for packet header")
+            // 目前发现生产有这个问题: 处理这个问题
             Err(BinlogError::IoError(err)) => {
                 //在Mysql重启的时候,无法做到重新连接的操作
                 warn!(
                     "read binlog error:{:?} we will retry 3 times to reconnection!",
                     err
                 );
-
-                for index in 1..=config.source_connect_retry_times() {
-                    info!("retry to reconnection mysql times:{}!", index);
-
-                    sleep(config.source_connect_timeout()).await;
-                    match client.connect().await {
-                        Ok(re_stream) => {
-                            info!("reconnection mysql success!");
-                            stream = re_stream;
-                            break;
-                        }
-                        Err(err) => {
-                            warn!("reconnection mysql failed, error:{:?}!", err);
-                        }
-                    }
-                }
+                return Err(CdcError::BinlogIo("Binlog IoError".to_string()));
+            }
+            Err(BinlogError::UnexpectedData(err)) => {
+                warn!(
+                    "read binlog error:{} we will retry 3 times to reconnection!",
+                    err
+                );
+                return Err(CdcError::BinlogUnexpected(err));
             }
             Err(err) => {
-                panic!("read mysql binlog error:{:?}", err);
+                warn!("read mysql binlog error:{:?}", err);
+                return Err(CdcError::Other("Binlog error".to_string()));
             }
         }
     }

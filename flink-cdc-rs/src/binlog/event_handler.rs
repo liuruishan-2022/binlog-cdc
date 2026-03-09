@@ -1,13 +1,13 @@
-use std::{alloc::System, process};
 
 use mysql_binlog_connector_rust::event::{
     delete_rows_event::DeleteRowsEvent, rotate_event::RotateEvent, table_map_event::TableMapEvent,
     update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{
     binlog::{Metrics, row::RowEventHandler, schema::TableMetaHandler},
+    common::CdcError,
     config::cdc::FlinkCdc,
 };
 
@@ -25,13 +25,13 @@ pub struct EventHandler<'a> {
 }
 
 impl<'a> EventHandler<'a> {
-    pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
-        let table_map_event_handler = TableMetaHandler::new(config, metrics).await;
+    pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Result<Self, CdcError> {
+        let table_map_event_handler = TableMetaHandler::new(config, metrics).await?;
         let row_event_handler = RowEventHandler::build(config, metrics).await;
-        EventHandler {
+        Ok(EventHandler {
             table_map_event_handler: table_map_event_handler,
             row_event_handler: row_event_handler,
-        }
+        })
     }
 
     pub async fn handle_table_map_event(&mut self, event: &TableMapEvent) {

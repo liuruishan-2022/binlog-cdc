@@ -8,6 +8,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::binlog::Metrics;
+use crate::common::CdcError;
 use crate::config::cdc::FlinkCdc;
 use crate::config::cdc::TableInclude;
 
@@ -21,11 +22,11 @@ pub struct TableSchema {
 }
 
 impl TableSchema {
-    pub async fn new(url: &str) -> Self {
+    pub async fn new(url: &str) -> Result<Self, CdcError> {
         let pool = MySqlPool::connect(url)
             .await
-            .expect("connection mysql error");
-        return TableSchema { pool };
+            .map_err(|e| CdcError::Other(format!("Connection mysql error: {:?}", e)))?;
+        return Ok(TableSchema { pool });
     }
 
     pub async fn desc_table(&self, table_id: u64, db_name: &str, table_name: &str) -> TableMeta {
@@ -173,15 +174,15 @@ pub struct TableMetaHandler<'a> {
 }
 
 impl<'a> TableMetaHandler<'a> {
-    pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
-        let table_schema = TableSchema::new(&config.source_url()).await;
-        TableMetaHandler {
+    pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Result<Self, CdcError> {
+        let table_schema = TableSchema::new(&config.source_url()).await?;
+        Ok(TableMetaHandler {
             config: config,
             table_schema: table_schema,
             cache: HashMap::new(),
             table_include: config.source_table_include(),
             metrics: metrics,
-        }
+        })
     }
 
     //

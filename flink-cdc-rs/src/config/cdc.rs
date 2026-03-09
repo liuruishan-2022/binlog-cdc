@@ -63,6 +63,10 @@ impl FlinkCdc {
         self.source.connect_timeout()
     }
 
+    pub fn source_keep_alive_interval(&self) -> Duration {
+        self.source.keep_alive_interval()
+    }
+
     pub fn source_connect_retry_times(&self) -> u32 {
         self.source.connect_max_retries()
     }
@@ -157,6 +161,8 @@ pub struct Source {
     connect_max_retries: Option<u32>,
     #[serde(rename = "connect.timeout")]
     connect_timeout: Option<Duration>,
+    #[serde(rename = "debezium.properties.keep.alive.interval.ms")]
+    keep_alive_interval_ms: Option<u64>,
 }
 
 impl Source {
@@ -247,6 +253,14 @@ impl Source {
     /// 默认是30s,因为网络或者是重启这种,一般恢复很慢,需要一定的时间间隔
     fn connect_timeout(&self) -> Duration {
         self.connect_timeout.unwrap_or(Duration::from_secs(30))
+    }
+
+    ///
+    /// 获取 debezium keep alive interval，默认为 120 秒
+    fn keep_alive_interval(&self) -> Duration {
+        self.keep_alive_interval_ms
+            .map(Duration::from_millis)
+            .unwrap_or(Duration::from_secs(120))
     }
 
     ///
