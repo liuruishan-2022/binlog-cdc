@@ -115,6 +115,9 @@ impl<'a> RowEventHandler<'a> {
         // 根据环境变量 RSKAFKA 决定使用哪个 sink
         // 如果设置了环境变量 RSKAFKA，则使用 rskafka_sink
         // 否则使用传统的 kafka_sink (rdkafka)
+        if std::env::var("NOKAFKA").is_ok() {
+            return;
+        }
         if std::env::var("RSKAFKA").is_ok() {
             self.rskafka_sink.send_messages(debezium).await;
         } else {
