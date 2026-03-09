@@ -29,7 +29,7 @@ pub async fn dump_and_parse(
 ) -> Result<i32, CdcError> {
     let metrics = metrics(registry).await;
     let savepoint = LocalFileSystem::default();
-    let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await;
+    let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await?;
 
     let binlog_file = savepoint.load().unwrap_or(config.source_binlog_file());
 
