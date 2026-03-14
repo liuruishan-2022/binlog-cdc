@@ -1,4 +1,3 @@
-
 use mysql_binlog_connector_rust::event::{
     delete_rows_event::DeleteRowsEvent, rotate_event::RotateEvent, table_map_event::TableMapEvent,
     update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
@@ -46,6 +45,11 @@ impl<'a> EventHandler<'a> {
         self.table_map_event_handler.clear_cache();
     }
 
+    ///
+    /// TODO 整体进行binlog的解析和Kafka的消息投递的CPU耗费还是很高的
+    /// 但是现在的问题是这样子:
+    /// 1. CPU只能耗费到1C,所以这个是程序的问题,串行化了
+    /// 2. 现在暂时还不知道CPU耗费在什么地方.不过也能猜个八九不离十
     pub async fn handle_write_rows_event(&mut self, event: WriteRowsEvent) {
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
         if let Some(table_meta) = table_meta {
