@@ -65,7 +65,7 @@ pub async fn dump_and_parse(
                         metrics.inc_flink_mysql_cdc("rotate");
                     }
                     EventData::TableMap(event) => {
-                        event_handler.handle_table_map_event(&event).await;
+                        event_handler.handle_table_map_event(event).await;
                         metrics.inc_flink_mysql_cdc("table-map");
                     }
                     EventData::WriteRows(event) => {

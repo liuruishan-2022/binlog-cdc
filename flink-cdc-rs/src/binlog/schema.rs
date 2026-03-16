@@ -180,6 +180,7 @@ pub struct TableMetaHandler<'a> {
     binlog_cache: BinlogTableCache,
     table_include: TableInclude,
     metrics: &'a Metrics,
+    binlog_filename: String,
 }
 
 impl<'a> TableMetaHandler<'a> {
@@ -192,13 +193,14 @@ impl<'a> TableMetaHandler<'a> {
             binlog_cache: Cache::new(1000),
             table_include: config.source_table_include(),
             metrics: metrics,
+            binlog_filename: String::from(""),
         })
     }
 
     //
     //1. 按照目前的过滤的速度大概: 18-19w/s的速度
     //2. 实验下增加了这个表的schema的读取的速度,大概会降低1w/s的速度，现在大概是17w/s的速度，还是可以的，每个binlog文件大概是: 600w-700w个事件
-    pub async fn record_table_meta(&mut self, event: &TableMapEvent) {
+    pub async fn record_table_meta(&mut self, event: TableMapEvent) {
         if self
             .table_include
             .can_exclude(&event.database_name, &event.table_name)
@@ -222,8 +224,12 @@ impl<'a> TableMetaHandler<'a> {
         }
     }
 
-    pub fn clear_cache(&mut self) {
+    ///
+    /// 增加binlog filename信息的记录,方便插入缓存的时候记录下这个信息
+    /// 因为binlog的事件是严格按照顺序流转的,所以我们只需要记录一次就行了
+    pub fn clear_cache(&mut self, filename: &str) {
         self.cache.clear();
+        self.binlog_filename = filename.to_string();
     }
 
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {

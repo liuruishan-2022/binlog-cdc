@@ -33,7 +33,7 @@ impl<'a> EventHandler<'a> {
         })
     }
 
-    pub async fn handle_table_map_event(&mut self, event: &TableMapEvent) {
+    pub async fn handle_table_map_event(&mut self, event: TableMapEvent) {
         self.table_map_event_handler.record_table_meta(event).await;
     }
 
@@ -42,7 +42,8 @@ impl<'a> EventHandler<'a> {
             "Rotate event clear cache! binlog:{} position:{}!",
             event.binlog_filename, event.binlog_position
         );
-        self.table_map_event_handler.clear_cache();
+        self.table_map_event_handler
+            .clear_cache(&event.binlog_filename);
     }
 
     ///
