@@ -282,4 +282,11 @@ impl<'a> TableMetaHandler<'a> {
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {
         self.cache.get(&table_id)
     }
+
+    ///
+    /// 需要严格按照串行的流程处理binlog的信息
+    /// 这个地方返回当前的binlog的名字
+    pub fn current_binlog(&self) -> String {
+        self.binlog_filename.clone()
+    }
 }
