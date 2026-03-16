@@ -263,3 +263,12 @@ pub struct BinlogEventData {
     binlog: String,
     event_data: EventData,
 }
+
+impl BinlogEventData {
+    pub fn new(binlog: String, event_data: EventData) -> Self {
+        BinlogEventData {
+            binlog: binlog,
+            event_data: event_data,
+        }
+    }
+}

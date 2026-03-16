@@ -52,6 +52,10 @@ impl<'a> EventHandler<'a> {
     /// 1. CPU只能耗费到1C,所以这个是程序的问题,串行化了
     /// 2. 现在暂时还不知道CPU耗费在什么地方.不过也能猜个八九不离十
     pub async fn handle_write_rows_event(&mut self, event: WriteRowsEvent) {
+        if std::env::var("CHANNEL").is_ok() {
+            return;
+        }
+
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
         if let Some(table_meta) = table_meta {
             self.row_event_handler
@@ -61,6 +65,10 @@ impl<'a> EventHandler<'a> {
     }
 
     pub async fn handle_update_rows_event(&mut self, event: UpdateRowsEvent) {
+        if std::env::var("CHANNEL").is_ok() {
+            return;
+        }
+
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
         if let Some(table_meta) = table_meta {
             self.row_event_handler
@@ -70,6 +78,10 @@ impl<'a> EventHandler<'a> {
     }
 
     pub async fn handle_delete_rows_event(&mut self, event: DeleteRowsEvent) {
+        if std::env::var("CHANNEL").is_ok() {
+            return;
+        }
+
         let table_meta = self.table_map_event_handler.table_schema(event.table_id);
         if let Some(table_meta) = table_meta {
             self.row_event_handler
