@@ -1,5 +1,3 @@
-use std::f32::consts::E;
-
 use hashbrown::HashMap;
 
 use futures_util::TryStreamExt;
@@ -168,32 +166,23 @@ impl ColumnMeta {
 
 ///
 /// 包含缓存的操作，key:table-id value: table-meta
-/// 增加一个binlog层次的缓存
 ///
 
-type BinlogTableCache = Cache<String, HashMap<u64, TableMeta>>;
-
 pub struct TableMetaHandler<'a> {
-    config: &'a FlinkCdc,
     table_schema: TableSchema,
     cache: HashMap<u64, TableMeta>,
-    binlog_cache: BinlogTableCache,
     table_include: TableInclude,
     metrics: &'a Metrics,
-    binlog_filename: String,
 }
 
 impl<'a> TableMetaHandler<'a> {
     pub async fn new(config: &'a FlinkCdc, metrics: &'a Metrics) -> Result<Self, CdcError> {
         let table_schema = TableSchema::new(&config.source_url()).await?;
         Ok(TableMetaHandler {
-            config: config,
             table_schema: table_schema,
             cache: HashMap::new(),
-            binlog_cache: Cache::new(1000),
             table_include: config.source_table_include(),
             metrics: metrics,
-            binlog_filename: String::from(""),
         })
     }
 
@@ -208,7 +197,6 @@ impl<'a> TableMetaHandler<'a> {
             return;
         } else {
             self.cache_table_meta(&event).await;
-            self.cache_binlog_table_meta(&event).await;
         }
     }
 
@@ -230,63 +218,15 @@ impl<'a> TableMetaHandler<'a> {
         }
     }
 
-    async fn cache_binlog_table_meta(&mut self, event: &TableMapEvent) {
-        if let Some(mut table_cache) = self.binlog_cache.get(&self.binlog_filename) {
-            if table_cache.contains_key(&event.table_id) {
-                return;
-            } else {
-                info!(
-                    "cache binlog table meta information to cache:{}!",
-                    &event.table_id
-                );
-                self.metrics
-                    .inc_flink_mysql_desc_table(&event.database_name);
-                let metadata = self
-                    .table_schema
-                    .desc_table(event.table_id, &event.database_name, &event.table_name)
-                    .await;
-                table_cache.insert(event.table_id, metadata);
-                self.binlog_cache
-                    .insert(self.binlog_filename.clone(), table_cache);
-            }
-        } else {
-            info!("build new binlog table meta cache:{}", &event.table_id);
-            self.metrics
-                .inc_flink_mysql_desc_table(&event.database_name);
-            let metadata = self
-                .table_schema
-                .desc_table(event.table_id, &event.database_name, &event.table_name)
-                .await;
-            let mut table_cache = HashMap::new();
-            table_cache.insert(event.table_id, metadata);
-            self.binlog_cache
-                .insert(self.binlog_filename.clone(), table_cache);
-        }
-    }
-
     ///
-    /// 增加binlog filename信息的记录,方便插入缓��的时候记录下这个信息
+    /// 增加binlog filename信息的记录,方便插入缓存的时候记录下这个信息
     /// 因为binlog的事件是严格按照顺序流转的,所以我们只需要记录一次就行了
     pub fn clear_cache(&mut self, filename: &str) {
         self.cache.clear();
-        self.binlog_filename = filename.to_string();
-        if self.binlog_cache.contains_key(filename) {
-            info!("binlog cache has exists key:{filename}");
-            return;
-        } else {
-            self.binlog_cache
-                .insert(filename.to_string(), HashMap::new());
-        }
+        info!("clear cache and set new binlog filename:{filename}");
     }
 
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {
         self.cache.get(&table_id)
-    }
-
-    ///
-    /// 需要严格按照串行的流程处理binlog的信息
-    /// 这个地方返回当前的binlog的名字
-    pub fn current_binlog(&self) -> String {
-        self.binlog_filename.clone()
     }
 }

@@ -17,6 +17,7 @@ use crate::{
     savepoint::{SavePoints, local::LocalFileSystem},
 };
 
+pub mod event_channel;
 pub mod event_handler;
 pub mod row;
 pub mod schema;
