@@ -1,6 +1,9 @@
+use std::hash::Hash;
+
 use hashbrown::HashMap;
 
 use futures_util::TryStreamExt;
+use moka::sync::Cache;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use sqlx::MySqlPool;
 use sqlx::Row;
@@ -165,10 +168,16 @@ impl ColumnMeta {
 
 ///
 /// 包含缓存的操作，key:table-id value: table-meta
+/// 增加一个binlog层次的缓存
+///
+
+type BinlogTableCache = Cache<String, HashMap<u64, TableMeta>>;
+
 pub struct TableMetaHandler<'a> {
     config: &'a FlinkCdc,
     table_schema: TableSchema,
     cache: HashMap<u64, TableMeta>,
+    binlog_cache: BinlogTableCache,
     table_include: TableInclude,
     metrics: &'a Metrics,
 }
@@ -180,6 +189,7 @@ impl<'a> TableMetaHandler<'a> {
             config: config,
             table_schema: table_schema,
             cache: HashMap::new(),
+            binlog_cache: Cache::new(1000),
             table_include: config.source_table_include(),
             metrics: metrics,
         })

@@ -252,3 +252,14 @@ async fn metrics(registry: Arc<Mutex<Registry>>) -> Metrics {
     metrics.register(&mut registry);
     return metrics;
 }
+
+///
+/// 提供一个能够存储Event信息的struct
+/// 在各个thread之间进行传递
+/// 整体的流程我们准备写成一个Pipeline
+/// 这种风格的操作,然后数据在不同的线程之间进行流转
+///
+pub struct BinlogEventData {
+    binlog: String,
+    event_data: EventData,
+}
