@@ -1,5 +1,3 @@
-use std::hash::Hash;
-
 use hashbrown::HashMap;
 
 use futures_util::TryStreamExt;
@@ -171,12 +169,13 @@ impl ColumnMeta {
 /// 增加一个binlog层次的缓存
 ///
 
+type TableCache = HashMap<u64, TableMeta>;
 type BinlogTableCache = Cache<String, HashMap<u64, TableMeta>>;
 
 pub struct TableMetaHandler<'a> {
     config: &'a FlinkCdc,
     table_schema: TableSchema,
-    cache: HashMap<u64, TableMeta>,
+    cache: TableCache,
     binlog_cache: BinlogTableCache,
     table_include: TableInclude,
     metrics: &'a Metrics,
@@ -189,7 +188,7 @@ impl<'a> TableMetaHandler<'a> {
         Ok(TableMetaHandler {
             config: config,
             table_schema: table_schema,
-            cache: HashMap::new(),
+            cache: TableCache::new(),
             binlog_cache: Cache::new(1000),
             table_include: config.source_table_include(),
             metrics: metrics,
@@ -220,16 +219,38 @@ impl<'a> TableMetaHandler<'a> {
                 .table_schema
                 .desc_table(event.table_id, &event.database_name, &event.table_name)
                 .await;
-            self.cache.insert(event.table_id, metadata);
+            self.cache.insert(event.table_id, metadata.clone());
+            self.cache_binlog_table_meta(metadata);
+        }
+    }
+
+    fn cache_binlog_table_meta(&mut self, metadata: TableMeta) {
+        if let Some(table_cache) = self.binlog_cache.get(&self.binlog_filename) {
+            let mut new_cache = table_cache.clone();
+            new_cache.insert(metadata.table_id, metadata);
+            self.binlog_cache
+                .insert(self.binlog_filename.clone(), new_cache);
+        } else {
+            let mut new_cache = TableCache::new();
+            new_cache.insert(metadata.table_id, metadata);
+            self.binlog_cache
+                .insert(self.binlog_filename.clone(), new_cache);
         }
     }
 
     ///
-    /// 增加binlog filename信息的记录,方便插入缓存的时候记录下这个信息
+    /// 增加binlog filename信息的记录,方便插入缓��的时候记录下这个信息
     /// 因为binlog的事件是严格按照顺序流转的,所以我们只需要记录一次就行了
     pub fn clear_cache(&mut self, filename: &str) {
         self.cache.clear();
         self.binlog_filename = filename.to_string();
+        if self.binlog_cache.contains_key(filename) {
+            info!("binlog cache has exists key:{filename}");
+            return;
+        } else {
+            self.binlog_cache
+                .insert(filename.to_string(), TableCache::new());
+        }
     }
 
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {
