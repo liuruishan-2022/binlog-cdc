@@ -1,3 +1,5 @@
+use std::f32::consts::E;
+
 use hashbrown::HashMap;
 
 use futures_util::TryStreamExt;
@@ -169,13 +171,12 @@ impl ColumnMeta {
 /// 增加一个binlog层次的缓存
 ///
 
-type TableCache = HashMap<u64, TableMeta>;
 type BinlogTableCache = Cache<String, HashMap<u64, TableMeta>>;
 
 pub struct TableMetaHandler<'a> {
     config: &'a FlinkCdc,
     table_schema: TableSchema,
-    cache: TableCache,
+    cache: HashMap<u64, TableMeta>,
     binlog_cache: BinlogTableCache,
     table_include: TableInclude,
     metrics: &'a Metrics,
@@ -188,7 +189,7 @@ impl<'a> TableMetaHandler<'a> {
         Ok(TableMetaHandler {
             config: config,
             table_schema: table_schema,
-            cache: TableCache::new(),
+            cache: HashMap::new(),
             binlog_cache: Cache::new(1000),
             table_include: config.source_table_include(),
             metrics: metrics,
@@ -205,7 +206,13 @@ impl<'a> TableMetaHandler<'a> {
             .can_exclude(&event.database_name, &event.table_name)
         {
             return;
+        } else {
+            self.cache_table_meta(&event).await;
+            self.cache_binlog_table_meta(&event).await;
         }
+    }
+
+    async fn cache_table_meta(&mut self, event: &TableMapEvent) {
         if self.cache.contains_key(&event.table_id) {
             return;
         } else {
@@ -219,22 +226,41 @@ impl<'a> TableMetaHandler<'a> {
                 .table_schema
                 .desc_table(event.table_id, &event.database_name, &event.table_name)
                 .await;
-            self.cache.insert(event.table_id, metadata.clone());
-            self.cache_binlog_table_meta(metadata);
+            self.cache.insert(event.table_id, metadata);
         }
     }
 
-    fn cache_binlog_table_meta(&mut self, metadata: TableMeta) {
-        if let Some(table_cache) = self.binlog_cache.get(&self.binlog_filename) {
-            let mut new_cache = table_cache.clone();
-            new_cache.insert(metadata.table_id, metadata);
-            self.binlog_cache
-                .insert(self.binlog_filename.clone(), new_cache);
+    async fn cache_binlog_table_meta(&mut self, event: &TableMapEvent) {
+        if let Some(mut table_cache) = self.binlog_cache.get(&self.binlog_filename) {
+            if table_cache.contains_key(&event.table_id) {
+                return;
+            } else {
+                info!(
+                    "cache binlog table meta information to cache:{}!",
+                    &event.table_id
+                );
+                self.metrics
+                    .inc_flink_mysql_desc_table(&event.database_name);
+                let metadata = self
+                    .table_schema
+                    .desc_table(event.table_id, &event.database_name, &event.table_name)
+                    .await;
+                table_cache.insert(event.table_id, metadata);
+                self.binlog_cache
+                    .insert(self.binlog_filename.clone(), table_cache);
+            }
         } else {
-            let mut new_cache = TableCache::new();
-            new_cache.insert(metadata.table_id, metadata);
+            info!("build new binlog table meta cache:{}", &event.table_id);
+            self.metrics
+                .inc_flink_mysql_desc_table(&event.database_name);
+            let metadata = self
+                .table_schema
+                .desc_table(event.table_id, &event.database_name, &event.table_name)
+                .await;
+            let mut table_cache = HashMap::new();
+            table_cache.insert(event.table_id, metadata);
             self.binlog_cache
-                .insert(self.binlog_filename.clone(), new_cache);
+                .insert(self.binlog_filename.clone(), table_cache);
         }
     }
 
@@ -249,7 +275,7 @@ impl<'a> TableMetaHandler<'a> {
             return;
         } else {
             self.binlog_cache
-                .insert(filename.to_string(), TableCache::new());
+                .insert(filename.to_string(), HashMap::new());
         }
     }
 
