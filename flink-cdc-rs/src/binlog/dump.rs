@@ -28,15 +28,19 @@ use crate::{
 /// 所以,我们暂时先把这些逻辑都放置到Dumper这个struct中
 ///
 
-pub struct Dumper {}
+pub struct Dumper {
+    current_binlog: String,
+}
 
 impl Dumper {
     pub fn new() -> Self {
-        Dumper {}
+        Dumper {
+            current_binlog: String::from(""),
+        }
     }
 
     pub async fn start(
-        &self,
+        &mut self,
         registry: Arc<Mutex<Registry>>,
         config: &FlinkCdc,
     ) -> Result<i32, CdcError> {
@@ -58,6 +62,7 @@ impl Dumper {
                     match data {
                         EventData::Rotate(event) => {
                             info!("read new binlog:{}", event.binlog_filename);
+                            self.set_binlog_filename(&event.binlog_filename);
                             savepoint.save(&event.binlog_filename);
                             metrics.inc_flink_mysql_cdc("rotate");
                         }
@@ -197,6 +202,10 @@ impl Dumper {
             .connect()
             .await
             .expect("connect to mysql read binlog file error!")
+    }
+
+    fn set_binlog_filename(&mut self, binlog_name: &str) {
+        self.current_binlog = binlog_name.to_string();
     }
 }
 

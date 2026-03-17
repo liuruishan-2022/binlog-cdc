@@ -24,13 +24,19 @@ pub mod event_handler;
 pub mod row;
 pub mod schema;
 
+///
+/// 新旧版本的速度对比,我们都是以相同的binlog的文件和数据内容做比对的
+/// 1. 旧版本的速度大概是:18分钟,然后一直耗费:1C,基本上是100%
+/// 2. 新版本的速度大概是:3分钟,然后CPU基本上是在: 130%左右,但是这个Receivers的消费者没有真正的处理消息内容
+///
+/// 总体看,是能够提升6倍的速度,也就是说,这个基本上是极限了,因为Sender端基本上是固定的了.单线程无法扩充了
 pub async fn start_dump(
     registry: Arc<Mutex<Registry>>,
     config: &FlinkCdc,
 ) -> Result<i32, CdcError> {
     if std::env::var("CHANNEL").is_ok() {
         info!("使用了channel的模式来处理");
-        let dumper = Dumper::new();
+        let mut dumper = Dumper::new();
         dumper.start(registry, config).await?;
     } else {
         dump_and_parse(registry, config).await?;
