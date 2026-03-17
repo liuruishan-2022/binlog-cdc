@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crossbeam_channel::{Receiver, Sender};
 use mysql_binlog_connector_rust::{
     binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
 };
@@ -8,15 +9,23 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
-    binlog::{Metrics, event_handler},
+    binlog::{BinlogEventData, Metrics, event_handler},
     common::CdcError,
     config::cdc::FlinkCdc,
-    savepoint::SavePoints,
-    savepoint::local::LocalFileSystem,
+    savepoint::{SavePoints, local::LocalFileSystem},
 };
 
 ///
 /// 使用oop的思想来做mysql binlog的dump工作
+///
+/// 首先这个地方是binlog的dump的起点,然后我们想做的功能如下:
+///
+/// 1. 首先是启动binlog的dump功能,然后执行mysql的binlog的操作
+/// 2. 接着就是处理各种binlog event事件
+/// 3. 对于table map event就同步串行处理,如果是数据事件,则发送到一个新的Channel中
+/// 4. 额外启动一个线程去消费这个channel
+///
+/// 所以,我们暂时先把这些逻辑都放置到Dumper这个struct中
 ///
 
 pub struct Dumper {}
@@ -26,33 +35,16 @@ impl Dumper {
         Dumper {}
     }
 
-    pub async fn dump_and_parse(
+    pub async fn start(
+        &self,
         registry: Arc<Mutex<Registry>>,
         config: &FlinkCdc,
     ) -> Result<i32, CdcError> {
         let metrics = metrics(registry).await;
         let savepoint = LocalFileSystem::default();
-        let mut event_handler = event_handler::EventHandler::new(&config, &metrics).await?;
-
         let binlog_file = savepoint.load().unwrap_or(config.source_binlog_file());
 
-        let mut client = BinlogClient {
-            url: config.source_url(),
-            server_id: config.source_server_id(),
-            binlog_filename: binlog_file,
-            binlog_position: config.source_binlog_offset(),
-            gtid_enabled: false,
-            gtid_set: "rust-123".to_string(),
-            heartbeat_interval_secs: 10,
-            timeout_secs: config.source_keep_alive_interval().as_secs(),
-            keepalive_idle_secs: 60,
-            keepalive_interval_secs: 60,
-        };
-
-        let mut stream = client
-            .connect()
-            .await
-            .expect("connect to mysql read binlog file error!");
+        let mut stream = self.binlog_stream(config, binlog_file).await;
 
         loop {
             let result = stream.read().await;
@@ -63,24 +55,19 @@ impl Dumper {
                     match data {
                         EventData::Rotate(event) => {
                             info!("read new binlog:{}", event.binlog_filename);
-                            event_handler.handle_rotate_event(&event);
                             savepoint.save(&event.binlog_filename);
                             metrics.inc_flink_mysql_cdc("rotate");
                         }
                         EventData::TableMap(event) => {
-                            event_handler.handle_table_map_event(event).await;
                             metrics.inc_flink_mysql_cdc("table-map");
                         }
                         EventData::WriteRows(event) => {
-                            event_handler.handle_write_rows_event(event).await;
                             metrics.inc_flink_mysql_cdc("write-rows");
                         }
                         EventData::DeleteRows(event) => {
-                            event_handler.handle_delete_rows_event(event).await;
                             metrics.inc_flink_mysql_cdc("delete-rows");
                         }
                         EventData::UpdateRows(event) => {
-                            event_handler.handle_update_rows_event(event).await;
                             metrics.inc_flink_mysql_cdc("update-rows");
                         }
                         EventData::NotSupported => {
@@ -142,6 +129,37 @@ impl Dumper {
                 }
             }
         }
+    }
+
+    fn channels(&self) -> Vec<(Sender<BinlogEventData>, Receiver<BinlogEventData>)> {
+        (1..=3)
+            .into_iter()
+            .map(|_| crossbeam_channel::bounded(10000))
+            .collect::<Vec<(Sender<BinlogEventData>, Receiver<BinlogEventData>)>>()
+    }
+
+    async fn binlog_stream(
+        &self,
+        config: &FlinkCdc,
+        binlog_file: String,
+    ) -> mysql_binlog_connector_rust::binlog_stream::BinlogStream {
+        let mut client = BinlogClient {
+            url: config.source_url(),
+            server_id: config.source_server_id(),
+            binlog_filename: binlog_file,
+            binlog_position: config.source_binlog_offset(),
+            gtid_enabled: false,
+            gtid_set: "rust-123".to_string(),
+            heartbeat_interval_secs: 10,
+            timeout_secs: config.source_keep_alive_interval().as_secs(),
+            keepalive_idle_secs: 60,
+            keepalive_interval_secs: 60,
+        };
+
+        client
+            .connect()
+            .await
+            .expect("connect to mysql read binlog file error!")
     }
 }
 

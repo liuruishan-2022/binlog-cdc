@@ -940,6 +940,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "crossbeam-channel",
  "dashmap",
  "futures-util",
  "hashbrown 0.16.1",
