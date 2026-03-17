@@ -150,11 +150,7 @@ impl Dumper {
         receivers.into_iter().for_each(|receiver| {
             tokio::spawn(async move {
                 for event in receiver.iter() {
-                    info!(
-                        "Received binlog event: binlog={}, event_type={:?}",
-                        event.binlog,
-                        std::mem::discriminant(&event.event_data)
-                    );
+                    //
                 }
                 info!("Receiver channel closed, exiting receiver task");
             });
@@ -169,7 +165,10 @@ impl Dumper {
         (senders, receivers)
     }
 
-    fn random_sender<'a>(&self, senders: &'a [Sender<BinlogEventData>]) -> &'a Sender<BinlogEventData> {
+    fn random_sender<'a>(
+        &self,
+        senders: &'a [Sender<BinlogEventData>],
+    ) -> &'a Sender<BinlogEventData> {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..senders.len());
