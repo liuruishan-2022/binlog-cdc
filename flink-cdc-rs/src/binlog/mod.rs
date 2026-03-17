@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
+    binlog::dump::Dumper,
     common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
@@ -22,6 +23,19 @@ pub mod event_channel;
 pub mod event_handler;
 pub mod row;
 pub mod schema;
+
+pub async fn start_dump(
+    registry: Arc<Mutex<Registry>>,
+    config: &FlinkCdc,
+) -> Result<i32, CdcError> {
+    if std::env::var("CHANNEL").is_ok() {
+        let dumper = Dumper::new();
+        dumper.start(registry, config).await?;
+    } else {
+        dump_and_parse(registry, config).await?;
+    }
+    Ok(0)
+}
 
 ///
 /// 监听binlog文件，以及解析binlong文件的内容

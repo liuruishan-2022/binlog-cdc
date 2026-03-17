@@ -34,7 +34,7 @@ hashbrown = { workspace = true }
 thiserror = { workspace = true }
 dashmap = { workspace = true }
 crossbeam-channel = "0.5.15"
-rand = "0.10"
+rand = "0.8"
 
 [profile.dev]
 opt-level = 0

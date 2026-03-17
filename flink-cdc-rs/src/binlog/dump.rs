@@ -169,9 +169,11 @@ impl Dumper {
         (senders, receivers)
     }
 
-    fn random_sender(&self, senders: &[Sender<BinlogEventData>]) -> &Sender<BinlogEventData> {
-        use rand::seq::SliceRandom;
-        senders.choose(&mut rand::thread_rng()).unwrap()
+    fn random_sender<'a>(&self, senders: &'a [Sender<BinlogEventData>]) -> &'a Sender<BinlogEventData> {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..senders.len());
+        &senders[index]
     }
 
     async fn binlog_stream(
