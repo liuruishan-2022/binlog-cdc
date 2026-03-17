@@ -36,7 +36,7 @@ pub async fn start_dump(
 ) -> Result<i32, CdcError> {
     if std::env::var("CHANNEL").is_ok() {
         info!("使用了channel的模式来处理");
-        let mut dumper = Dumper::new();
+        let mut dumper = Dumper::new(config).await?;
         dumper.start(registry, config).await?;
     } else {
         dump_and_parse(registry, config).await?;

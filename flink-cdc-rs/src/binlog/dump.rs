@@ -1,15 +1,21 @@
 use std::sync::Arc;
 
+use base64::{Engine, engine::general_purpose};
+use chrono::{Local, TimeZone, offset::LocalResult};
 use crossbeam_channel::{Receiver, Sender};
 use mysql_binlog_connector_rust::{
-    binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
+    binlog_client::BinlogClient,
+    binlog_error::BinlogError,
+    column::column_value::ColumnValue,
+    event::{event_data::EventData, row_event::RowEvent},
 };
 use prometheus_client::registry::Registry;
+use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
-    binlog::{BinlogEventData, Metrics, event_handler},
+    binlog::{BinlogEventData, Metrics, event_channel::BinlogTableMetaHandler, event_handler},
     common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
@@ -30,13 +36,16 @@ use crate::{
 
 pub struct Dumper {
     current_binlog: String,
+    table_meta_handler: Arc<BinlogTableMetaHandler>,
 }
 
 impl Dumper {
-    pub fn new() -> Self {
-        Dumper {
+    pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
+        let table_meta_handler = BinlogTableMetaHandler::new(&config.source_url()).await?;
+        Ok(Dumper {
             current_binlog: String::from(""),
-        }
+            table_meta_handler: Arc::new(table_meta_handler),
+        })
     }
 
     pub async fn start(
@@ -68,6 +77,9 @@ impl Dumper {
                         }
                         EventData::TableMap(event) => {
                             metrics.inc_flink_mysql_cdc("table-map");
+                            self.table_meta_handler
+                                .record_table_meta(&self.current_binlog, event)
+                                .await;
                         }
                         EventData::WriteRows(event) => {
                             metrics.inc_flink_mysql_cdc("write-rows");
@@ -158,10 +170,50 @@ impl Dumper {
     }
 
     fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>) {
+        let table_handler = Arc::clone(&self.table_meta_handler);
         receivers.into_iter().for_each(|receiver| {
+            let table_handler = Arc::clone(&table_handler);
             tokio::spawn(async move {
-                for event in receiver.iter() {
-                    //
+                for binlog_event in receiver.iter() {
+                    match binlog_event.event_data {
+                        EventData::WriteRows(event) => {
+                            let table_meta =
+                                table_handler.table_schema(&binlog_event.binlog, event.table_id);
+                            if let Some(table_meta) = table_meta {
+                                let rows =
+                                    BinlogRowEventHandler::parse_write_rows(&table_meta, event);
+                                for row in rows {
+                                    info!("Parsed write row: {:?}", row.after);
+                                }
+                            }
+                        }
+                        EventData::UpdateRows(event) => {
+                            let table_meta =
+                                table_handler.table_schema(&binlog_event.binlog, event.table_id);
+                            if let Some(table_meta) = table_meta {
+                                let rows =
+                                    BinlogRowEventHandler::parse_update_rows(&table_meta, event);
+                                for row in rows {
+                                    info!(
+                                        "Parsed update row: before={:?}, after={:?}",
+                                        row.before, row.after
+                                    );
+                                }
+                            }
+                        }
+                        EventData::DeleteRows(event) => {
+                            let table_meta =
+                                table_handler.table_schema(&binlog_event.binlog, event.table_id);
+                            if let Some(table_meta) = table_meta {
+                                let rows =
+                                    BinlogRowEventHandler::parse_delete_rows(&table_meta, event);
+                                for row in rows {
+                                    info!("Parsed delete row: before={:?}", row.before);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 info!("Receiver channel closed, exiting receiver task");
             });
@@ -225,4 +277,142 @@ async fn metrics(registry: Arc<Mutex<Registry>>) -> Metrics {
     let metrics = Metrics::default();
     metrics.register(&mut registry);
     return metrics;
+}
+
+///
+/// 处理 Binlog Row 事件的 Handler
+/// 不包含 Kafka 和 Metrics 相关逻辑
+///
+
+pub struct BinlogRowEventHandler {}
+
+impl BinlogRowEventHandler {
+    ///
+    /// 解析并返回 Debezium 格式的数据
+    ///
+    pub fn parse_write_rows(
+        table_meta: &crate::binlog::schema::TableMeta,
+        event: mysql_binlog_connector_rust::event::write_rows_event::WriteRowsEvent,
+    ) -> Vec<BinlogRowEvent> {
+        event
+            .rows
+            .into_iter()
+            .map(|row| BinlogRowEvent {
+                event_type: RowEventType::Write,
+                before: None,
+                after: Some(Self::convert_and_parse_row(table_meta, row)),
+            })
+            .collect()
+    }
+
+    pub fn parse_update_rows(
+        table_meta: &crate::binlog::schema::TableMeta,
+        event: mysql_binlog_connector_rust::event::update_rows_event::UpdateRowsEvent,
+    ) -> Vec<BinlogRowEvent> {
+        event
+            .rows
+            .into_iter()
+            .map(|(before_row, after_row)| BinlogRowEvent {
+                event_type: RowEventType::Update,
+                before: Some(Self::convert_and_parse_row(table_meta, before_row)),
+                after: Some(Self::convert_and_parse_row(table_meta, after_row)),
+            })
+            .collect()
+    }
+
+    pub fn parse_delete_rows(
+        table_meta: &crate::binlog::schema::TableMeta,
+        event: mysql_binlog_connector_rust::event::delete_rows_event::DeleteRowsEvent,
+    ) -> Vec<BinlogRowEvent> {
+        event
+            .rows
+            .into_iter()
+            .map(|row| BinlogRowEvent {
+                event_type: RowEventType::Delete,
+                before: Some(Self::convert_and_parse_row(table_meta, row)),
+                after: None,
+            })
+            .collect()
+    }
+
+    fn convert_and_parse_row(
+        table_meta: &crate::binlog::schema::TableMeta,
+        row: RowEvent,
+    ) -> Map<String, Value> {
+        let mut position: usize = 1;
+        let mut row_map = serde_json::Map::new();
+        row.column_values.into_iter().for_each(|column_value| {
+            if let Some(column) = table_meta.column(position) {
+                let column_name = column.column_name();
+                let value: Value = match column_value {
+                    ColumnValue::Tiny(data) => json!(data),
+                    ColumnValue::Short(data) => json!(data),
+                    ColumnValue::Long(data) => json!(data),
+                    ColumnValue::LongLong(data) => json!(data),
+                    ColumnValue::Float(data) => json!(data),
+                    ColumnValue::Double(data) => json!(data),
+                    ColumnValue::Decimal(data) => json!(data),
+                    ColumnValue::Time(data) => json!(data),
+                    ColumnValue::Date(data) => json!(data),
+                    ColumnValue::DateTime(data) => json!(data),
+                    ColumnValue::Timestamp(data) => {
+                        let time_format = format_timestamp(data);
+                        json!(time_format)
+                    }
+                    ColumnValue::Year(data) => json!(data),
+                    ColumnValue::String(data) => {
+                        let data =
+                            String::from_utf8(data).expect("convert data to utf8 string error");
+                        json!(data)
+                    }
+                    ColumnValue::Blob(data) => {
+                        let data = String::from_utf8(data.clone())
+                            .unwrap_or_else(|_| general_purpose::STANDARD.encode(data));
+                        json!(data)
+                    }
+                    ColumnValue::Bit(data) => json!(data),
+                    ColumnValue::Set(data) => json!(data),
+                    ColumnValue::Enum(data) => json!(data),
+                    ColumnValue::Json(data) => json!(data),
+                    _ => Value::Null,
+                };
+                row_map.insert(column_name.to_string(), value);
+            }
+            position = position + 1;
+        });
+        row_map
+    }
+}
+
+///
+/// 表示一行 binlog 数据的变化
+///
+
+#[derive(Debug, Clone)]
+pub struct BinlogRowEvent {
+    pub event_type: RowEventType,
+    pub before: Option<Map<String, Value>>,
+    pub after: Option<Map<String, Value>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RowEventType {
+    Write,
+    Update,
+    Delete,
+}
+
+///
+/// 格式化时间戳
+///
+
+fn format_timestamp(timestamp: i64) -> String {
+    let millis = timestamp / 1000;
+    match Local.timestamp_millis_opt(millis) {
+        LocalResult::Single(time) => time.format("%Y-%m-%d %H:%M:%S").to_string(),
+        _ => {
+            warn!("timestamp is invalid:{}!", timestamp);
+            "".to_string()
+        }
+    }
 }
