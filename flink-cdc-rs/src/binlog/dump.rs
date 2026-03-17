@@ -44,6 +44,9 @@ impl Dumper {
         let savepoint = LocalFileSystem::default();
         let binlog_file = savepoint.load().unwrap_or(config.source_binlog_file());
 
+        let (senders, receivers) = self.channels();
+        self.start_receivers(receivers);
+
         let mut stream = self.binlog_stream(config, binlog_file).await;
 
         loop {
@@ -63,12 +66,24 @@ impl Dumper {
                         }
                         EventData::WriteRows(event) => {
                             metrics.inc_flink_mysql_cdc("write-rows");
+                            let event =
+                                BinlogEventData::new("".to_string(), EventData::WriteRows(event));
+                            let sender = self.random_sender(&senders);
+                            let _ = sender.send(event);
                         }
                         EventData::DeleteRows(event) => {
                             metrics.inc_flink_mysql_cdc("delete-rows");
+                            let event =
+                                BinlogEventData::new("".to_string(), EventData::DeleteRows(event));
+                            let sender = self.random_sender(&senders);
+                            let _ = sender.send(event);
                         }
                         EventData::UpdateRows(event) => {
                             metrics.inc_flink_mysql_cdc("update-rows");
+                            let event =
+                                BinlogEventData::new("".to_string(), EventData::UpdateRows(event));
+                            let sender = self.random_sender(&senders);
+                            let _ = sender.send(event);
                         }
                         EventData::NotSupported => {
                             metrics.inc_flink_mysql_cdc("not-supported");
@@ -131,11 +146,32 @@ impl Dumper {
         }
     }
 
-    fn channels(&self) -> Vec<(Sender<BinlogEventData>, Receiver<BinlogEventData>)> {
-        (1..=3)
+    fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>) {
+        receivers.into_iter().for_each(|receiver| {
+            tokio::spawn(async move {
+                for event in receiver.iter() {
+                    info!(
+                        "Received binlog event: binlog={}, event_type={:?}",
+                        event.binlog,
+                        std::mem::discriminant(&event.event_data)
+                    );
+                }
+                info!("Receiver channel closed, exiting receiver task");
+            });
+        });
+    }
+
+    fn channels(&self) -> (Vec<Sender<BinlogEventData>>, Vec<Receiver<BinlogEventData>>) {
+        let (senders, receivers): (Vec<_>, Vec<_>) = (1..=3)
             .into_iter()
             .map(|_| crossbeam_channel::bounded(10000))
-            .collect::<Vec<(Sender<BinlogEventData>, Receiver<BinlogEventData>)>>()
+            .unzip();
+        (senders, receivers)
+    }
+
+    fn random_sender(&self, senders: &[Sender<BinlogEventData>]) -> &Sender<BinlogEventData> {
+        use rand::seq::SliceRandom;
+        senders.choose(&mut rand::thread_rng()).unwrap()
     }
 
     async fn binlog_stream(
