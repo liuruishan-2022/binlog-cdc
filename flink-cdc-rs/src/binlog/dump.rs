@@ -71,22 +71,28 @@ impl Dumper {
                         }
                         EventData::WriteRows(event) => {
                             metrics.inc_flink_mysql_cdc("write-rows");
-                            let event =
-                                BinlogEventData::new("".to_string(), EventData::WriteRows(event));
+                            let event = BinlogEventData::new(
+                                self.current_binlog_filename(),
+                                EventData::WriteRows(event),
+                            );
                             let sender = self.random_sender(&senders);
                             let _ = sender.send(event);
                         }
                         EventData::DeleteRows(event) => {
                             metrics.inc_flink_mysql_cdc("delete-rows");
-                            let event =
-                                BinlogEventData::new("".to_string(), EventData::DeleteRows(event));
+                            let event = BinlogEventData::new(
+                                self.current_binlog_filename(),
+                                EventData::DeleteRows(event),
+                            );
                             let sender = self.random_sender(&senders);
                             let _ = sender.send(event);
                         }
                         EventData::UpdateRows(event) => {
                             metrics.inc_flink_mysql_cdc("update-rows");
-                            let event =
-                                BinlogEventData::new("".to_string(), EventData::UpdateRows(event));
+                            let event = BinlogEventData::new(
+                                self.current_binlog_filename(),
+                                EventData::UpdateRows(event),
+                            );
                             let sender = self.random_sender(&senders);
                             let _ = sender.send(event);
                         }
@@ -206,6 +212,10 @@ impl Dumper {
 
     fn set_binlog_filename(&mut self, binlog_name: &str) {
         self.current_binlog = binlog_name.to_string();
+    }
+
+    fn current_binlog_filename(&self) -> String {
+        self.current_binlog.clone()
     }
 }
 
