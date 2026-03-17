@@ -1,7 +1,7 @@
 ///
 /// 使用rust的channel来做线程间的通信
 ///
-use hashbrown::HashMap;
+use dashmap::DashMap;
 use moka::sync::Cache;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use tracing::info;
@@ -30,7 +30,7 @@ impl EventChannelHandler {
 ///
 pub struct BinlogTableMetaHandler {
     table_schema: TableSchema,
-    binlog_cache: Cache<String, HashMap<u64, TableMeta>>,
+    binlog_cache: Cache<String, DashMap<u64, TableMeta>>,
     binlog_filename: String,
 }
 
@@ -70,7 +70,7 @@ impl BinlogTableMetaHandler {
                 .table_schema
                 .desc_table(event.table_id, &event.database_name, &event.table_name)
                 .await;
-            let mut table_cache = HashMap::new();
+            let mut table_cache = DashMap::new();
             table_cache.insert(event.table_id, metadata);
             self.binlog_cache
                 .insert(self.binlog_filename.clone(), table_cache);
@@ -88,7 +88,7 @@ impl BinlogTableMetaHandler {
             return;
         } else {
             self.binlog_cache
-                .insert(filename.to_string(), HashMap::new());
+                .insert(filename.to_string(), DashMap::new());
         }
     }
 
@@ -99,7 +99,7 @@ impl BinlogTableMetaHandler {
         self.binlog_cache
             .get(&self.binlog_filename)?
             .get(&table_id)
-            .cloned()
+            .map(|r| r.clone())
     }
 
     ///
