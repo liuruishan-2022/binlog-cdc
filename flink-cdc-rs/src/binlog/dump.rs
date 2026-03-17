@@ -1,11 +1,19 @@
 use std::sync::Arc;
 
-use mysql_binlog_connector_rust::{binlog_error::BinlogError, event::event_data::EventData};
+use mysql_binlog_connector_rust::{
+    binlog_client::BinlogClient, binlog_error::BinlogError, event::event_data::EventData,
+};
 use prometheus_client::registry::Registry;
 use tokio::sync::Mutex;
-use tracing::warn;
+use tracing::{info, warn};
 
-use crate::{binlog::Metrics, common::CdcError, config::cdc::FlinkCdc};
+use crate::{
+    binlog::{Metrics, event_handler},
+    common::CdcError,
+    config::cdc::FlinkCdc,
+    savepoint::SavePoints,
+    savepoint::local::LocalFileSystem,
+};
 
 ///
 /// 使用oop的思想来做mysql binlog的dump工作
