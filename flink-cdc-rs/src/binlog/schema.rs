@@ -1,7 +1,6 @@
 use hashbrown::HashMap;
 
 use futures_util::TryStreamExt;
-use moka::sync::Cache;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use sqlx::MySqlPool;
 use sqlx::Row;
