@@ -8,11 +8,8 @@ use mysql_binlog_connector_rust::{
     binlog_error::BinlogError,
     column::column_value::ColumnValue,
     event::{
-        event_data::EventData,
-        row_event::RowEvent,
-        write_rows_event::WriteRowsEvent,
-        delete_rows_event::DeleteRowsEvent,
-        update_rows_event::UpdateRowsEvent,
+        delete_rows_event::DeleteRowsEvent, event_data::EventData, row_event::RowEvent,
+        update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
     },
 };
 use prometheus_client::registry::Registry;
@@ -44,6 +41,10 @@ use crate::{
 ///
 /// 经过控制变量的方法进行对比,chanel模式比之前的模式速度快:10倍左右
 /// 当然channel模式更耗费CPU,大概需要耗费5-6个C,不过这也是提升速度的唯一方案
+///
+/// 按照primary key执行partition的时候,大概是10s一个binlog的解析和分发，
+/// 和同样的数据量的之前的方案对比,之前大概是:55s的样子,也就是说快了5.5倍的性能
+/// 这个和刚才的6倍差距是需要在binlog的线程根据primary key计算partition
 
 pub struct Dumper {
     current_binlog: String,
