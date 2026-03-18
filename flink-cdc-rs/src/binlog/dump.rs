@@ -13,7 +13,6 @@ use mysql_binlog_connector_rust::{
     },
 };
 use prometheus_client::registry::Registry;
-use rayon::vec;
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
