@@ -229,7 +229,7 @@ impl<'a> RowEventHandler<'a> {
 ///
 /// Debezium的JSON格式的数据结构对象
 ///
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct DebeziumFormat {
     before: Option<Value>,
     after: Option<Value>,
@@ -307,15 +307,15 @@ impl DebeziumFormat {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct DebeziumSource {
     db: String,
     table: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct MessageKey {
-    keys: Map<String, Value>,
+    pub keys: Map<String, Value>,
 }
 
 impl MessageKey {

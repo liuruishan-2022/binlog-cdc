@@ -15,10 +15,12 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
-    binlog::{BinlogEventData, Metrics, event_channel::BinlogTableMetaHandler, event_handler},
+    binlog::{BinlogEventData, Metrics, event_channel::BinlogTableMetaHandler},
+    binlog::row::{DebeziumFormat, MessageKey},
     common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
+    transform::parser::ProjectionHandler,
 };
 
 ///
@@ -58,7 +60,7 @@ impl Dumper {
         let binlog_file = savepoint.load().unwrap_or(config.source_binlog_file());
 
         let (senders, receivers) = self.channels();
-        self.start_receivers(receivers);
+        self.start_receivers(receivers, config);
 
         let mut stream = self.binlog_stream(config, binlog_file).await;
 
@@ -169,10 +171,11 @@ impl Dumper {
         }
     }
 
-    fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>) {
+    fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>, config: &FlinkCdc) {
         let table_handler = Arc::clone(&self.table_meta_handler);
         receivers.into_iter().for_each(|receiver| {
             let table_handler = Arc::clone(&table_handler);
+            let row_handler = BinlogRowEventHandler::new(config);
             tokio::spawn(async move {
                 for binlog_event in receiver.iter() {
                     match binlog_event.event_data {
@@ -180,36 +183,24 @@ impl Dumper {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let rows =
-                                    BinlogRowEventHandler::parse_write_rows(&table_meta, event);
-                                for row in rows {
-                                    info!("Parsed write row: {:?}", row.after);
-                                }
+                                let _rows =
+                                    row_handler.parse_write_rows(&table_meta, event);
                             }
                         }
                         EventData::UpdateRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let rows =
-                                    BinlogRowEventHandler::parse_update_rows(&table_meta, event);
-                                for row in rows {
-                                    info!(
-                                        "Parsed update row: before={:?}, after={:?}",
-                                        row.before, row.after
-                                    );
-                                }
+                                let _rows =
+                                    row_handler.parse_update_rows(&table_meta, event);
                             }
                         }
                         EventData::DeleteRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let rows =
-                                    BinlogRowEventHandler::parse_delete_rows(&table_meta, event);
-                                for row in rows {
-                                    info!("Parsed delete row: before={:?}", row.before);
-                                }
+                                let _rows =
+                                    row_handler.parse_delete_rows(&table_meta, event);
                             }
                         }
                         _ => {}
@@ -284,55 +275,110 @@ async fn metrics(registry: Arc<Mutex<Registry>>) -> Metrics {
 /// 不包含 Kafka 和 Metrics 相关逻辑
 ///
 
-pub struct BinlogRowEventHandler {}
+pub struct BinlogRowEventHandler {
+    projection: ProjectionHandler,
+}
 
 impl BinlogRowEventHandler {
+    pub fn new(config: &FlinkCdc) -> Self {
+        BinlogRowEventHandler {
+            projection: ProjectionHandler::create(config.transforms()),
+        }
+    }
+
+    ///
     ///
     /// 解析并返回 Debezium 格式的数据
     ///
     pub fn parse_write_rows(
+        &self,
         table_meta: &crate::binlog::schema::TableMeta,
         event: mysql_binlog_connector_rust::event::write_rows_event::WriteRowsEvent,
-    ) -> Vec<BinlogRowEvent> {
-        event
+    ) -> Vec<DebeziumFormat> {
+        let mut rows = event
             .rows
             .into_iter()
-            .map(|row| BinlogRowEvent {
-                event_type: RowEventType::Write,
-                before: None,
-                after: Some(Self::convert_and_parse_row(table_meta, row)),
+            .map(|row| Self::convert_and_parse_row(table_meta, row))
+            .collect::<Vec<_>>();
+
+        rows.iter_mut()
+            .for_each(|map| {
+                self.projection.eval(&table_meta.qualified_table_name(), map);
+            });
+
+        rows.into_iter()
+            .map(|after| {
+                DebeziumFormat::insert(
+                    serde_json::json!(after),
+                    table_meta.db_name(),
+                    table_meta.table_name(),
+                    self.create_key(table_meta, &after),
+                )
             })
             .collect()
     }
 
     pub fn parse_update_rows(
+        &self,
         table_meta: &crate::binlog::schema::TableMeta,
         event: mysql_binlog_connector_rust::event::update_rows_event::UpdateRowsEvent,
-    ) -> Vec<BinlogRowEvent> {
+    ) -> Vec<DebeziumFormat> {
         event
             .rows
             .into_iter()
-            .map(|(before_row, after_row)| BinlogRowEvent {
-                event_type: RowEventType::Update,
-                before: Some(Self::convert_and_parse_row(table_meta, before_row)),
-                after: Some(Self::convert_and_parse_row(table_meta, after_row)),
+            .map(|(before_row, after_row)| {
+                (
+                    Self::convert_and_parse_row(table_meta, before_row),
+                    Self::convert_and_parse_row(table_meta, after_row),
+                )
+            })
+            .map(|(before, mut after)| {
+                self.projection.eval(&table_meta.qualified_table_name(), &mut after);
+                DebeziumFormat::update(
+                    serde_json::json!(before),
+                    serde_json::json!(after),
+                    table_meta.db_name(),
+                    table_meta.table_name(),
+                    self.create_key(table_meta, &before),
+                )
             })
             .collect()
     }
 
     pub fn parse_delete_rows(
+        &self,
         table_meta: &crate::binlog::schema::TableMeta,
         event: mysql_binlog_connector_rust::event::delete_rows_event::DeleteRowsEvent,
-    ) -> Vec<BinlogRowEvent> {
+    ) -> Vec<DebeziumFormat> {
         event
             .rows
             .into_iter()
-            .map(|row| BinlogRowEvent {
-                event_type: RowEventType::Delete,
-                before: Some(Self::convert_and_parse_row(table_meta, row)),
-                after: None,
+            .map(|row| Self::convert_and_parse_row(table_meta, row))
+            .map(|before| {
+                DebeziumFormat::delete(
+                    serde_json::json!(before),
+                    table_meta.db_name(),
+                    table_meta.table_name(),
+                    self.create_key(table_meta, &before),
+                )
             })
             .collect()
+    }
+
+    fn create_key(&self, table_meta: &crate::binlog::schema::TableMeta, row: &serde_json::Map<String, Value>) -> MessageKey {
+        let column_name = table_meta.primary_column();
+        let primary = row.get(column_name).unwrap();
+        let mut key = serde_json::Map::new();
+        key.insert(column_name.to_string(), primary.clone());
+        key.insert(
+            "TableId".to_string(),
+            serde_json::json!(format!(
+                "{}.{}",
+                table_meta.db_name(),
+                table_meta.table_name()
+            )),
+        );
+        return MessageKey::new(key);
     }
 
     fn convert_and_parse_row(
@@ -382,24 +428,6 @@ impl BinlogRowEventHandler {
         });
         row_map
     }
-}
-
-///
-/// 表示一行 binlog 数据的变化
-///
-
-#[derive(Debug, Clone)]
-pub struct BinlogRowEvent {
-    pub event_type: RowEventType,
-    pub before: Option<Map<String, Value>>,
-    pub after: Option<Map<String, Value>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum RowEventType {
-    Write,
-    Update,
-    Delete,
 }
 
 ///
