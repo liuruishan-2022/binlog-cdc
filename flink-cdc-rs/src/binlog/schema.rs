@@ -80,6 +80,7 @@ pub struct TableMeta {
     table_name: String,
     columns: HashMap<u32, ColumnMeta>,
     primary_key: String,
+    primary_key_position: u32,
 }
 
 impl TableMeta {
@@ -89,21 +90,24 @@ impl TableMeta {
         table_name: String,
         columns: Vec<ColumnMeta>,
     ) -> Self {
-        let primary_key = columns
+        let primary_key_column = columns
             .iter()
-            .find(|c| c.is_primary())
-            .map(|c| c.column_name().to_string())
-            .unwrap_or_else(|| {
-                warn!("{}.{} not have primary key!", db_name, table_name);
-                return columns
-                    .iter()
-                    .min_by_key(|col| col.ordinal_position)
-                    .map(|col| col.column_name().to_string())
-                    .expect(
-                        format!("{}.{} no columns to use primary key", db_name, table_name)
-                            .as_str(),
-                    );
-            });
+            .find(|c| c.is_primary());
+
+        let (primary_key, primary_key_position) = if let Some(col) = primary_key_column {
+            (col.column_name().to_string(), col.ordinal_position)
+        } else {
+            warn!("{}.{} not have primary key!", db_name, table_name);
+            let fallback_col = columns
+                .iter()
+                .min_by_key(|col| col.ordinal_position)
+                .expect(
+                    format!("{}.{} no columns to use primary key", db_name, table_name)
+                        .as_str(),
+                );
+            (fallback_col.column_name().to_string(), fallback_col.ordinal_position)
+        };
+
         let columns = columns
             .into_iter()
             .map(|col| (col.ordinal_position, col))
@@ -114,6 +118,7 @@ impl TableMeta {
             table_name: table_name,
             columns: columns,
             primary_key: primary_key,
+            primary_key_position: primary_key_position,
         }
     }
 
@@ -131,6 +136,10 @@ impl TableMeta {
 
     pub fn primary_column(&self) -> &str {
         &self.primary_key
+    }
+
+    pub fn primary_key_position(&self) -> u32 {
+        self.primary_key_position
     }
 
     pub fn qualified_table_name(&self) -> String {
