@@ -15,8 +15,8 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::{
-    binlog::{BinlogEventData, Metrics, event_channel::BinlogTableMetaHandler},
     binlog::row::{DebeziumFormat, MessageKey},
+    binlog::{BinlogEventData, Metrics, event_channel::BinlogTableMetaHandler},
     common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
@@ -35,6 +35,8 @@ use crate::{
 ///
 /// 所以,我们暂时先把这些逻辑都放置到Dumper这个struct中
 ///
+/// 经过控制变量的方法进行对比,chanel模式比之前的模式速度快:10倍左右
+/// 当然channel模式更耗费CPU,大概需要耗费5-6个C,不过这也是提升速度的唯一方案
 
 pub struct Dumper {
     current_binlog: String,
@@ -187,24 +189,21 @@ impl Dumper {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let _rows =
-                                    row_handler.parse_write_rows(&table_meta, event);
+                                let _rows = row_handler.parse_write_rows(&table_meta, event);
                             }
                         }
                         EventData::UpdateRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let _rows =
-                                    row_handler.parse_update_rows(&table_meta, event);
+                                let _rows = row_handler.parse_update_rows(&table_meta, event);
                             }
                         }
                         EventData::DeleteRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let _rows =
-                                    row_handler.parse_delete_rows(&table_meta, event);
+                                let _rows = row_handler.parse_delete_rows(&table_meta, event);
                             }
                         }
                         _ => {}
@@ -305,10 +304,10 @@ impl BinlogRowEventHandler {
             .map(|row| Self::convert_and_parse_row(table_meta, row))
             .collect::<Vec<_>>();
 
-        rows.iter_mut()
-            .for_each(|map| {
-                self.projection.eval(&table_meta.qualified_table_name(), map);
-            });
+        rows.iter_mut().for_each(|map| {
+            self.projection
+                .eval(&table_meta.qualified_table_name(), map);
+        });
 
         rows.into_iter()
             .map(|after| {
@@ -337,7 +336,8 @@ impl BinlogRowEventHandler {
                 )
             })
             .map(|(before, mut after)| {
-                self.projection.eval(&table_meta.qualified_table_name(), &mut after);
+                self.projection
+                    .eval(&table_meta.qualified_table_name(), &mut after);
                 DebeziumFormat::update(
                     serde_json::json!(before),
                     serde_json::json!(after),
@@ -369,7 +369,11 @@ impl BinlogRowEventHandler {
             .collect()
     }
 
-    fn create_key(&self, table_meta: &crate::binlog::schema::TableMeta, row: &serde_json::Map<String, Value>) -> MessageKey {
+    fn create_key(
+        &self,
+        table_meta: &crate::binlog::schema::TableMeta,
+        row: &serde_json::Map<String, Value>,
+    ) -> MessageKey {
         let column_name = table_meta.primary_column();
         let primary = row.get(column_name).unwrap();
         let mut key = serde_json::Map::new();

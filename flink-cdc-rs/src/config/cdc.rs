@@ -379,9 +379,22 @@ impl Pipeline {
     }
 
     pub fn parallelism(&self) -> u32 {
+        // tokio worker threads 为 12，如果 parallelism >= 12，则限制为 6 避免死锁
+        const TOKIO_WORKERS: u32 = 12;
+
         if self.parallelism <= 0 {
-            return 3;
+            return 6;
         }
+
+        if self.parallelism >= TOKIO_WORKERS {
+            tracing::warn!(
+                "parallelism {} is >= tokio workers {}, limiting to 6 to avoid deadlock",
+                self.parallelism,
+                TOKIO_WORKERS
+            );
+            return 6;
+        }
+
         self.parallelism
     }
 

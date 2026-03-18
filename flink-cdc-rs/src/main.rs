@@ -28,7 +28,7 @@ pub mod transform;
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 12)]
 async fn main() {
     tracing_subscriber::fmt()
         .with_timer(LocalTimer)
