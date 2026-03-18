@@ -35,6 +35,7 @@ thiserror = { workspace = true }
 dashmap = { workspace = true }
 crossbeam-channel = "0.5.15"
 rand = "0.8"
+rayon = { workspace = true }
 
 [profile.dev]
 opt-level = 0

@@ -7,6 +7,8 @@ use mysql_binlog_connector_rust::{
         update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
     },
 };
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tracing::warn;
@@ -127,7 +129,7 @@ impl<'a> RowEventHandler<'a> {
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {
         return rows
-            .into_iter()
+            .into_par_iter()
             .map(|row| self.convert_and_parse_row(table_meta, row))
             .collect::<Vec<Map<String, Value>>>();
     }
