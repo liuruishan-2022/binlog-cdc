@@ -7,9 +7,16 @@ use mysql_binlog_connector_rust::{
     binlog_client::BinlogClient,
     binlog_error::BinlogError,
     column::column_value::ColumnValue,
-    event::{event_data::EventData, row_event::RowEvent},
+    event::{
+        event_data::EventData,
+        row_event::RowEvent,
+        write_rows_event::WriteRowsEvent,
+        delete_rows_event::DeleteRowsEvent,
+        update_rows_event::UpdateRowsEvent,
+    },
 };
 use prometheus_client::registry::Registry;
+use rayon::vec;
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -91,30 +98,15 @@ impl Dumper {
                         }
                         EventData::WriteRows(event) => {
                             metrics.inc_flink_mysql_cdc("write-rows");
-                            let event = BinlogEventData::new(
-                                self.current_binlog_filename(),
-                                EventData::WriteRows(event),
-                            );
-                            let sender = self.random_sender(&senders);
-                            let _ = sender.send(event);
+                            self.partition_write_event(event, &self.current_binlog, &senders);
                         }
                         EventData::DeleteRows(event) => {
                             metrics.inc_flink_mysql_cdc("delete-rows");
-                            let event = BinlogEventData::new(
-                                self.current_binlog_filename(),
-                                EventData::DeleteRows(event),
-                            );
-                            let sender = self.random_sender(&senders);
-                            let _ = sender.send(event);
+                            self.partition_delete_event(event, &self.current_binlog, &senders);
                         }
                         EventData::UpdateRows(event) => {
                             metrics.inc_flink_mysql_cdc("update-rows");
-                            let event = BinlogEventData::new(
-                                self.current_binlog_filename(),
-                                EventData::UpdateRows(event),
-                            );
-                            let sender = self.random_sender(&senders);
-                            let _ = sender.send(event);
+                            self.partition_update_event(event, &self.current_binlog, &senders);
                         }
                         EventData::NotSupported => {
                             metrics.inc_flink_mysql_cdc("not-supported");
@@ -174,6 +166,134 @@ impl Dumper {
                     return Err(CdcError::Other("Binlog error".to_string()));
                 }
             }
+        }
+    }
+
+    fn partition_write_event(
+        &self,
+        event: WriteRowsEvent,
+        binlog: &str,
+        senders: &Vec<Sender<BinlogEventData>>,
+    ) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let sender_count = senders.len();
+
+        if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
+            event.rows.into_iter().for_each(|row| {
+                if let Some(primary_key) = row
+                    .column_values
+                    .get(table_meta.primary_key_position() as usize)
+                {
+                    let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
+                        .to_string();
+                    let mut hasher = DefaultHasher::new();
+                    key.hash(&mut hasher);
+                    let hash_code = hasher.finish();
+                    let sender = senders
+                        .get(hash_code as usize % sender_count)
+                        .expect("fetch sender error");
+
+                    let partition_event = WriteRowsEvent {
+                        table_id: event.table_id,
+                        included_columns: vec![],
+                        rows: vec![row],
+                    };
+
+                    let binlog_event = BinlogEventData::new(
+                        binlog.to_string(),
+                        EventData::WriteRows(partition_event),
+                    );
+                    let _ = sender.send(binlog_event);
+                }
+            });
+        }
+    }
+
+    fn partition_delete_event(
+        &self,
+        event: DeleteRowsEvent,
+        binlog: &str,
+        senders: &Vec<Sender<BinlogEventData>>,
+    ) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let sender_count = senders.len();
+
+        if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
+            event.rows.into_iter().for_each(|row| {
+                if let Some(primary_key) = row
+                    .column_values
+                    .get(table_meta.primary_key_position() as usize)
+                {
+                    let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
+                        .to_string();
+                    let mut hasher = DefaultHasher::new();
+                    key.hash(&mut hasher);
+                    let hash_code = hasher.finish();
+                    let sender = senders
+                        .get(hash_code as usize % sender_count)
+                        .expect("fetch sender error");
+
+                    let partition_event = DeleteRowsEvent {
+                        table_id: event.table_id,
+                        included_columns: vec![],
+                        rows: vec![row],
+                    };
+
+                    let binlog_event = BinlogEventData::new(
+                        binlog.to_string(),
+                        EventData::DeleteRows(partition_event),
+                    );
+                    let _ = sender.send(binlog_event);
+                }
+            });
+        }
+    }
+
+    fn partition_update_event(
+        &self,
+        event: UpdateRowsEvent,
+        binlog: &str,
+        senders: &Vec<Sender<BinlogEventData>>,
+    ) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let sender_count = senders.len();
+
+        if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
+            event.rows.into_iter().for_each(|(before, after)| {
+                // 使用 before 行的 primary_key 来确定路由
+                if let Some(primary_key) = before
+                    .column_values
+                    .get(table_meta.primary_key_position() as usize)
+                {
+                    let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
+                        .to_string();
+                    let mut hasher = DefaultHasher::new();
+                    key.hash(&mut hasher);
+                    let hash_code = hasher.finish();
+                    let sender = senders
+                        .get(hash_code as usize % sender_count)
+                        .expect("fetch sender error");
+
+                    let partition_event = UpdateRowsEvent {
+                        table_id: event.table_id,
+                        included_columns_before: vec![],
+                        included_columns_after: vec![],
+                        rows: vec![(before, after)],
+                    };
+
+                    let binlog_event = BinlogEventData::new(
+                        binlog.to_string(),
+                        EventData::UpdateRows(partition_event),
+                    );
+                    let _ = sender.send(binlog_event);
+                }
+            });
         }
     }
 
@@ -398,43 +518,47 @@ impl BinlogRowEventHandler {
         row.column_values.into_iter().for_each(|column_value| {
             if let Some(column) = table_meta.column(position) {
                 let column_name = column.column_name();
-                let value: Value = match column_value {
-                    ColumnValue::Tiny(data) => json!(data),
-                    ColumnValue::Short(data) => json!(data),
-                    ColumnValue::Long(data) => json!(data),
-                    ColumnValue::LongLong(data) => json!(data),
-                    ColumnValue::Float(data) => json!(data),
-                    ColumnValue::Double(data) => json!(data),
-                    ColumnValue::Decimal(data) => json!(data),
-                    ColumnValue::Time(data) => json!(data),
-                    ColumnValue::Date(data) => json!(data),
-                    ColumnValue::DateTime(data) => json!(data),
-                    ColumnValue::Timestamp(data) => {
-                        let time_format = format_timestamp(data);
-                        json!(time_format)
-                    }
-                    ColumnValue::Year(data) => json!(data),
-                    ColumnValue::String(data) => {
-                        let data =
-                            String::from_utf8(data).expect("convert data to utf8 string error");
-                        json!(data)
-                    }
-                    ColumnValue::Blob(data) => {
-                        let data = String::from_utf8(data.clone())
-                            .unwrap_or_else(|_| general_purpose::STANDARD.encode(data));
-                        json!(data)
-                    }
-                    ColumnValue::Bit(data) => json!(data),
-                    ColumnValue::Set(data) => json!(data),
-                    ColumnValue::Enum(data) => json!(data),
-                    ColumnValue::Json(data) => json!(data),
-                    _ => Value::Null,
-                };
+                let value = Self::convert_column_value_to_json(&column_value);
                 row_map.insert(column_name.to_string(), value);
             }
             position = position + 1;
         });
         row_map
+    }
+
+    fn convert_column_value_to_json(column_value: &ColumnValue) -> Value {
+        match column_value {
+            ColumnValue::Tiny(data) => json!(data),
+            ColumnValue::Short(data) => json!(data),
+            ColumnValue::Long(data) => json!(data),
+            ColumnValue::LongLong(data) => json!(data),
+            ColumnValue::Float(data) => json!(data),
+            ColumnValue::Double(data) => json!(data),
+            ColumnValue::Decimal(data) => json!(data),
+            ColumnValue::Time(data) => json!(data),
+            ColumnValue::Date(data) => json!(data),
+            ColumnValue::DateTime(data) => json!(data),
+            ColumnValue::Timestamp(data) => {
+                let time_format = format_timestamp(*data);
+                json!(time_format)
+            }
+            ColumnValue::Year(data) => json!(data),
+            ColumnValue::String(data) => {
+                let data =
+                    String::from_utf8(data.clone()).expect("convert data to utf8 string error");
+                json!(data)
+            }
+            ColumnValue::Blob(data) => {
+                let data = String::from_utf8(data.clone())
+                    .unwrap_or_else(|_| general_purpose::STANDARD.encode(data));
+                json!(data)
+            }
+            ColumnValue::Bit(data) => json!(data),
+            ColumnValue::Set(data) => json!(data),
+            ColumnValue::Enum(data) => json!(data),
+            ColumnValue::Json(data) => json!(data),
+            _ => Value::Null,
+        }
     }
 }
 
