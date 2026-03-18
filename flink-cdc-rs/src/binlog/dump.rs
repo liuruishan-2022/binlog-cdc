@@ -342,16 +342,6 @@ impl Dumper {
         (senders, receivers)
     }
 
-    fn random_sender<'a>(
-        &self,
-        senders: &'a [Sender<BinlogEventData>],
-    ) -> &'a Sender<BinlogEventData> {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..senders.len());
-        &senders[index]
-    }
-
     async fn binlog_stream(
         &self,
         config: &FlinkCdc,
@@ -378,10 +368,6 @@ impl Dumper {
 
     fn set_binlog_filename(&mut self, binlog_name: &str) {
         self.current_binlog = binlog_name.to_string();
-    }
-
-    fn current_binlog_filename(&self) -> String {
-        self.current_binlog.clone()
     }
 }
 
