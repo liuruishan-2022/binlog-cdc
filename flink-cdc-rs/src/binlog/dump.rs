@@ -39,6 +39,8 @@ use crate::{
 pub struct Dumper {
     current_binlog: String,
     table_meta_handler: Arc<BinlogTableMetaHandler>,
+    parallelism: u32,
+    capacity: u32,
 }
 
 impl Dumper {
@@ -47,6 +49,8 @@ impl Dumper {
         Ok(Dumper {
             current_binlog: String::from(""),
             table_meta_handler: Arc::new(table_meta_handler),
+            parallelism: config.pipeline_parallelism(),
+            capacity: config.pipeline_capacity(),
         })
     }
 
@@ -212,9 +216,9 @@ impl Dumper {
     }
 
     fn channels(&self) -> (Vec<Sender<BinlogEventData>>, Vec<Receiver<BinlogEventData>>) {
-        let (senders, receivers): (Vec<_>, Vec<_>) = (1..=3)
+        let (senders, receivers): (Vec<_>, Vec<_>) = (1..=self.parallelism)
             .into_iter()
-            .map(|_| crossbeam_channel::bounded(10000))
+            .map(|_| crossbeam_channel::bounded(self.capacity as usize))
             .unzip();
         (senders, receivers)
     }

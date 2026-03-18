@@ -120,6 +120,10 @@ impl FlinkCdc {
         self.pipeline.parallelism()
     }
 
+    pub fn pipeline_capacity(&self) -> u32 {
+        self.pipeline.capacity()
+    }
+
     ///
     /// route信息的获取
     pub fn route_sink(&self, source: &str) -> Option<String> {
@@ -365,6 +369,8 @@ impl Route {
 pub struct Pipeline {
     name: String,
     parallelism: u32,
+    #[serde(rename = "channel.capacity")]
+    capacity: Option<u32>,
 }
 
 impl Pipeline {
@@ -373,7 +379,14 @@ impl Pipeline {
     }
 
     pub fn parallelism(&self) -> u32 {
+        if self.parallelism <= 0 {
+            return 3;
+        }
         self.parallelism
+    }
+
+    pub fn capacity(&self) -> u32 {
+        self.capacity.unwrap_or(10000)
     }
 }
 
