@@ -23,6 +23,7 @@ use crate::{
     common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
+    sink::kafka_sink::KafkaSink,
     transform::parser::ProjectionHandler,
 };
 
@@ -50,16 +51,19 @@ pub struct Dumper {
     table_meta_handler: Arc<BinlogTableMetaHandler>,
     parallelism: u32,
     capacity: u32,
+    kafka_sink: Arc<KafkaSink>,
 }
 
 impl Dumper {
     pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
         let table_meta_handler = BinlogTableMetaHandler::new(&config.source_url()).await?;
+        let kafka_sink = Arc::new(KafkaSink::build(config));
         Ok(Dumper {
             current_binlog: String::from(""),
             table_meta_handler: Arc::new(table_meta_handler),
             parallelism: config.pipeline_parallelism(),
             capacity: config.pipeline_capacity(),
+            kafka_sink,
         })
     }
 
@@ -299,9 +303,11 @@ impl Dumper {
 
     fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>, config: &FlinkCdc) {
         let table_handler = Arc::clone(&self.table_meta_handler);
+        let kafka_sink = Arc::clone(&self.kafka_sink);
         receivers.into_iter().for_each(|receiver| {
             let table_handler = Arc::clone(&table_handler);
             let row_handler = BinlogRowEventHandler::new(config);
+            let kafka_sink = Arc::clone(&kafka_sink);
             tokio::spawn(async move {
                 for binlog_event in receiver.iter() {
                     match binlog_event.event_data {
@@ -309,21 +315,24 @@ impl Dumper {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let _rows = row_handler.parse_write_rows(&table_meta, event);
+                                let debezium_formats = row_handler.parse_write_rows(&table_meta, event);
+                                kafka_sink.send_batch_messages(debezium_formats).await;
                             }
                         }
                         EventData::UpdateRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let _rows = row_handler.parse_update_rows(&table_meta, event);
+                                let debezium_formats = row_handler.parse_update_rows(&table_meta, event);
+                                kafka_sink.send_batch_messages(debezium_formats).await;
                             }
                         }
                         EventData::DeleteRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let _rows = row_handler.parse_delete_rows(&table_meta, event);
+                                let debezium_formats = row_handler.parse_delete_rows(&table_meta, event);
+                                kafka_sink.send_batch_messages(debezium_formats).await;
                             }
                         }
                         _ => {}
