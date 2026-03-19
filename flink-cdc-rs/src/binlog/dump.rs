@@ -315,24 +315,34 @@ impl Dumper {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let debezium_formats = row_handler.parse_write_rows(&table_meta, event);
-                                kafka_sink.send_batch_messages(debezium_formats).await;
+                                let debezium_formats =
+                                    row_handler.parse_write_rows(&table_meta, event);
+                                if !std::env::var("NOKAFKA").is_ok() {
+                                    kafka_sink.send_batch_messages(debezium_formats).await;
+                                }
                             }
                         }
                         EventData::UpdateRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let debezium_formats = row_handler.parse_update_rows(&table_meta, event);
-                                kafka_sink.send_batch_messages(debezium_formats).await;
+                                let debezium_formats =
+                                    row_handler.parse_update_rows(&table_meta, event);
+                                if !std::env::var("NOKAFKA").is_ok() {
+                                    kafka_sink.send_batch_messages(debezium_formats).await;
+                                }
                             }
                         }
                         EventData::DeleteRows(event) => {
                             let table_meta =
                                 table_handler.table_schema(&binlog_event.binlog, event.table_id);
                             if let Some(table_meta) = table_meta {
-                                let debezium_formats = row_handler.parse_delete_rows(&table_meta, event);
-                                kafka_sink.send_batch_messages(debezium_formats).await;
+                                let debezium_formats =
+                                    row_handler.parse_delete_rows(&table_meta, event);
+
+                                if !std::env::var("NOKAFKA").is_ok() {
+                                    kafka_sink.send_batch_messages(debezium_formats).await;
+                                }
                             }
                         }
                         _ => {}
