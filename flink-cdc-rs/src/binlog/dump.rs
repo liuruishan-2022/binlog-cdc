@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{Local, TimeZone, offset::LocalResult};
@@ -13,7 +13,7 @@ use mysql_binlog_connector_rust::{
     },
 };
 use prometheus_client::registry::Registry;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Number, Value, json};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -538,34 +538,34 @@ impl BinlogRowEventHandler {
 
     fn convert_column_value_to_json(column_value: &ColumnValue) -> Value {
         match column_value {
-            ColumnValue::Tiny(data) => json!(data),
-            ColumnValue::Short(data) => json!(data),
-            ColumnValue::Long(data) => json!(data),
-            ColumnValue::LongLong(data) => json!(data),
-            ColumnValue::Float(data) => json!(data),
-            ColumnValue::Double(data) => json!(data),
-            ColumnValue::Decimal(data) => json!(data),
-            ColumnValue::Time(data) => json!(data),
-            ColumnValue::Date(data) => json!(data),
-            ColumnValue::DateTime(data) => json!(data),
+            ColumnValue::Tiny(data) => Value::Number(Number::from(*data)),
+            ColumnValue::Short(data) => Value::Number(Number::from(*data)),
+            ColumnValue::Long(data) => Value::Number(Number::from(*data)),
+            ColumnValue::LongLong(data) => Value::Number(Number::from(*data)),
+            ColumnValue::Float(data) => Value::Number(Number::from_f64(*data as f64).unwrap()),
+            ColumnValue::Double(data) => Value::Number(Number::from_f64(*data).unwrap()),
+            ColumnValue::Decimal(data) => Value::String(data.to_string()),
+            ColumnValue::Time(data) => Value::String(data.to_string()),
+            ColumnValue::Date(data) => Value::String(data.to_string()),
+            ColumnValue::DateTime(data) => Value::String(data.to_string()),
             ColumnValue::Timestamp(data) => {
                 let time_format = format_timestamp(*data);
-                json!(time_format)
+                Value::String(time_format)
             }
-            ColumnValue::Year(data) => json!(data),
+            ColumnValue::Year(data) => Value::Number(Number::from(*data)),
             ColumnValue::String(data) => {
                 let data =
                     String::from_utf8(data.clone()).expect("convert data to utf8 string error");
-                json!(data)
+                Value::String(data)
             }
             ColumnValue::Blob(data) => {
                 let data = String::from_utf8(data.clone())
                     .unwrap_or_else(|_| general_purpose::STANDARD.encode(data));
-                json!(data)
+                Value::String(data)
             }
-            ColumnValue::Bit(data) => json!(data),
-            ColumnValue::Set(data) => json!(data),
-            ColumnValue::Enum(data) => json!(data),
+            ColumnValue::Bit(data) => Value::Number(Number::from(*data)),
+            ColumnValue::Set(data) => Value::Number(Number::from(*data)),
+            ColumnValue::Enum(data) => Value::Number(Number::from(*data)),
             ColumnValue::Json(data) => json!(data),
             _ => Value::Null,
         }
