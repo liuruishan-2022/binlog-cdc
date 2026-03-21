@@ -17,7 +17,7 @@ regex = "1.12.2"
 rskafka = "0.6.0"
 rust_decimal = { version = "1.39.0", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = { version = "1.0.145", features = ["preserve_order"] }
 serde_yaml = "0.9.34"
 sqlparser = { version = "0.59.0", features = ["serde", "visitor"] }
 sqlx = { version = "0.8.6", features = [
