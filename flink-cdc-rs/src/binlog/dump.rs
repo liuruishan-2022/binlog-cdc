@@ -317,7 +317,7 @@ impl Dumper {
                             if let Some(table_meta) = table_meta {
                                 let debezium_formats =
                                     row_handler.parse_write_rows(&table_meta, event);
-                                //kafka_sink.send_batch_messages(debezium_formats).await;
+                                kafka_sink.send_batch_messages(debezium_formats).await;
                             }
                         }
                         EventData::UpdateRows(event) => {
@@ -326,7 +326,7 @@ impl Dumper {
                             if let Some(table_meta) = table_meta {
                                 let debezium_formats =
                                     row_handler.parse_update_rows(&table_meta, event);
-                                //kafka_sink.send_batch_messages(debezium_formats).await;
+                                kafka_sink.send_batch_messages(debezium_formats).await;
                             }
                         }
                         EventData::DeleteRows(event) => {
@@ -335,7 +335,7 @@ impl Dumper {
                             if let Some(table_meta) = table_meta {
                                 let debezium_formats =
                                     row_handler.parse_delete_rows(&table_meta, event);
-                                //kafka_sink.send_batch_messages(debezium_formats).await;
+                                kafka_sink.send_batch_messages(debezium_formats).await;
                             }
                         }
                         _ => {}
