@@ -65,6 +65,9 @@ impl BinlogTableMetaHandler {
 
     ///
     /// 获取指定table_id的表元数据
+    /// 注意moka的get操作是对entry的value做clone动作的,我们修改成Arc之后对比下:
+    /// 之前的clone动作是耗费8.8c-9c，然后处理一个binlog大概需要:12s左右.
+    /// 然后使用Arc之后,大概耗费:5.5c,然后处理一个binlog大概需要:8s-10s左右
     ///
     pub fn table_schema(&self, filename: &str, table_id: u64) -> Option<TableMeta> {
         self.binlog_cache
