@@ -80,7 +80,7 @@ impl<'a> RowEventHandler<'a> {
                 self.projection
                     .eval(&table_meta.qualified_table_name(), &mut after);
                 DebeziumFormat::update(
-                    json!(before),
+                    Some(json!(before)),
                     json!(after),
                     table_meta.db_name(),
                     table_meta.table_name(),
@@ -255,9 +255,9 @@ impl DebeziumFormat {
         }
     }
 
-    pub fn update(before: Value, after: Value, db: &str, table: &str, key: MessageKey) -> Self {
+    pub fn update(before: Option<Value>, after: Value, db: &str, table: &str, key: MessageKey) -> Self {
         DebeziumFormat {
-            before: Some(before),
+            before: before,
             after: Some(after),
             op: "u".to_string(),
             source: DebeziumSource {

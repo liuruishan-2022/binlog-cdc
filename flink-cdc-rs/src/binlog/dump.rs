@@ -398,12 +398,14 @@ async fn metrics(registry: Arc<Mutex<Registry>>) -> Metrics {
 
 pub struct BinlogRowEventHandler {
     projection: ProjectionHandler,
+    update_source_keep: bool,
 }
 
 impl BinlogRowEventHandler {
     pub fn new(config: &FlinkCdc) -> Self {
         BinlogRowEventHandler {
             projection: ProjectionHandler::create(config.transforms()),
+            update_source_keep: config.source_update_source_keep(),
         }
     }
 
@@ -448,20 +450,24 @@ impl BinlogRowEventHandler {
             .rows
             .into_iter()
             .map(|(before_row, after_row)| {
-                (
-                    Self::convert_and_parse_row(table_meta, before_row),
-                    Self::convert_and_parse_row(table_meta, after_row),
-                )
+                let before = if self.update_source_keep {
+                    Some(Self::convert_and_parse_row(table_meta, before_row))
+                } else {
+                    None
+                };
+                let after = Self::convert_and_parse_row(table_meta, after_row);
+                (before, after)
             })
             .map(|(before, mut after)| {
                 self.projection
                     .eval(&table_meta.qualified_table_name(), &mut after);
+                let key = self.create_key(table_meta, &after);
                 DebeziumFormat::update(
-                    serde_json::json!(before),
+                    before.map(|b| serde_json::json!(b)),
                     serde_json::json!(after),
                     table_meta.db_name(),
                     table_meta.table_name(),
-                    self.create_key(table_meta, &before),
+                    key,
                 )
             })
             .collect()

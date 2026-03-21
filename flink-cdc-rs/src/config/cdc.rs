@@ -71,6 +71,10 @@ impl FlinkCdc {
         self.source.connect_max_retries()
     }
 
+    pub fn source_update_source_keep(&self) -> bool {
+        self.source.update_source_keep()
+    }
+
     ///
     /// 获取sink相关的信息配置
     ///
@@ -167,6 +171,8 @@ pub struct Source {
     connect_timeout: Option<Duration>,
     #[serde(rename = "debezium.properties.keep.alive.interval.ms")]
     keep_alive_interval_ms: Option<u64>,
+    #[serde(rename = "debezium.properties.update.source.keep")]
+    update_source_keep: Option<bool>,
 }
 
 impl Source {
@@ -271,6 +277,12 @@ impl Source {
     /// 默认是3次
     fn connect_max_retries(&self) -> u32 {
         self.connect_max_retries.unwrap_or(3)
+    }
+
+    ///
+    /// 获取是否在 UPDATE 事件中保留 source 字段，默认为 true
+    pub fn update_source_keep(&self) -> bool {
+        self.update_source_keep.unwrap_or(true)
     }
 }
 
