@@ -9,20 +9,9 @@ use tracing::info;
 use crate::binlog::schema::TableMeta;
 use crate::binlog::schema::TableSchema;
 use crate::common::CdcError;
-use crate::config::cdc::FlinkCdc;
+use std::sync::Arc;
 
-pub struct EventChannelHandler {
-    binlog_table_handler: BinlogTableMetaHandler,
-}
-
-impl EventChannelHandler {
-    pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
-        let binlog_table_handler = BinlogTableMetaHandler::new(&config.source_url()).await?;
-        Ok(EventChannelHandler {
-            binlog_table_handler,
-        })
-    }
-}
+type BinlogTableMeta = DashMap<u64, TableMeta>;
 
 ///
 /// Binlog级别的表元数据缓存处理器
@@ -30,7 +19,7 @@ impl EventChannelHandler {
 ///
 pub struct BinlogTableMetaHandler {
     table_schema: TableSchema,
-    binlog_cache: Cache<String, DashMap<u64, TableMeta>>,
+    binlog_cache: Cache<String, Arc<BinlogTableMeta>>,
 }
 
 impl BinlogTableMetaHandler {
@@ -59,8 +48,7 @@ impl BinlogTableMetaHandler {
                     .desc_table(event.table_id, &event.database_name, &event.table_name)
                     .await;
                 table_cache.insert(event.table_id, metadata);
-                self.binlog_cache
-                    .insert(filename.to_string(), table_cache);
+                self.binlog_cache.insert(filename.to_string(), table_cache);
             }
         } else {
             info!("build new binlog table meta cache:{}", &event.table_id);
@@ -71,7 +59,7 @@ impl BinlogTableMetaHandler {
             let table_cache = DashMap::new();
             table_cache.insert(event.table_id, metadata);
             self.binlog_cache
-                .insert(filename.to_string(), table_cache);
+                .insert(filename.to_string(), Arc::new(table_cache));
         }
     }
 
