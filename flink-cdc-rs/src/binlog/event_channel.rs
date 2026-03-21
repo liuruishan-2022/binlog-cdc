@@ -9,6 +9,8 @@ use tracing::info;
 use crate::binlog::schema::TableMeta;
 use crate::binlog::schema::TableSchema;
 use crate::common::CdcError;
+use crate::config::cdc::FlinkCdc;
+use crate::config::cdc::TableInclude;
 use std::sync::Arc;
 
 type BinlogTableMeta = DashMap<u64, TableMeta>;
@@ -20,14 +22,16 @@ type BinlogTableMeta = DashMap<u64, TableMeta>;
 pub struct BinlogTableMetaHandler {
     table_schema: TableSchema,
     binlog_cache: Cache<String, Arc<BinlogTableMeta>>,
+    table_include: TableInclude,
 }
 
 impl BinlogTableMetaHandler {
-    pub async fn new(mysql_url: &str) -> Result<Self, CdcError> {
-        let table_schema = TableSchema::new(mysql_url).await?;
+    pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
+        let table_schema = TableSchema::new(&config.source_url()).await?;
         Ok(BinlogTableMetaHandler {
             table_schema,
             binlog_cache: Cache::new(1000),
+            table_include: config.source_table_include(),
         })
     }
 
@@ -35,6 +39,14 @@ impl BinlogTableMetaHandler {
     /// 记录表元数据到binlog级别的缓存中
     ///
     pub async fn record_table_meta(&self, filename: &str, event: TableMapEvent) {
+        // 检查是否需要同步这个表
+        if self
+            .table_include
+            .can_exclude(&event.database_name, &event.table_name)
+        {
+            return;
+        }
+
         if let Some(table_cache) = self.binlog_cache.get(filename) {
             if table_cache.contains_key(&event.table_id) {
                 return;

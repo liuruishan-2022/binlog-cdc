@@ -56,7 +56,7 @@ pub struct Dumper {
 
 impl Dumper {
     pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
-        let table_meta_handler = BinlogTableMetaHandler::new(&config.source_url()).await?;
+        let table_meta_handler = BinlogTableMetaHandler::new(config).await?;
         let kafka_sink = Arc::new(KafkaSink::build(config));
         Ok(Dumper {
             current_binlog: String::from(""),
