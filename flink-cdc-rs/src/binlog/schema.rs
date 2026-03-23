@@ -29,6 +29,11 @@ impl TableSchema {
         return Ok(TableSchema { pool });
     }
 
+    ///
+    /// TODO 这个有一个场景的bug需要兼容下
+    /// 就是假设一个binlog开头的时候,我们对某个表进行了insert操作,然后
+    /// 在binlog中途对这个表进行删除,那么cdc任务可能延后的时候，就会
+    /// 出现访问这个表不存在了,这个就属于当前访问以前的事情的未知性
     pub async fn desc_table(&self, table_id: u64, db_name: &str, table_name: &str) -> TableMeta {
         let sql = format!("desc `{}`.{}", db_name, table_name);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
@@ -90,9 +95,7 @@ impl TableMeta {
         table_name: String,
         columns: Vec<ColumnMeta>,
     ) -> Self {
-        let primary_key_column = columns
-            .iter()
-            .find(|c| c.is_primary());
+        let primary_key_column = columns.iter().find(|c| c.is_primary());
 
         let (primary_key, primary_key_position) = if let Some(col) = primary_key_column {
             (col.column_name().to_string(), col.ordinal_position)
@@ -102,10 +105,12 @@ impl TableMeta {
                 .iter()
                 .min_by_key(|col| col.ordinal_position)
                 .expect(
-                    format!("{}.{} no columns to use primary key", db_name, table_name)
-                        .as_str(),
+                    format!("{}.{} no columns to use primary key", db_name, table_name).as_str(),
                 );
-            (fallback_col.column_name().to_string(), fallback_col.ordinal_position)
+            (
+                fallback_col.column_name().to_string(),
+                fallback_col.ordinal_position,
+            )
         };
 
         let columns = columns
@@ -144,6 +149,10 @@ impl TableMeta {
 
     pub fn qualified_table_name(&self) -> String {
         format!("{}.{}", self.db_name, self.table_name)
+    }
+
+    pub fn table_id(&self) -> u64 {
+        self.table_id
     }
 }
 
@@ -236,5 +245,46 @@ impl<'a> TableMetaHandler<'a> {
 
     pub fn table_schema(&self, table_id: u64) -> Option<&TableMeta> {
         self.cache.get(&table_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 测试不存在表的情况，查看异常信息
+    #[tokio::test]
+    async fn test_desc_table_nonexistent_table() {
+        let url = "mysql://root:dsap2018@172.16.1.67:3306/mostest_gsms";
+
+        let table_schema = TableSchema::new(url).await.expect("Failed to connect to database");
+
+        let table_id = 999u64;
+        let db_name = "mostest_gsms";
+        let table_name = "nonexistent_table_xyz";
+
+        // 执行 desc_table - 对于不存在的表，查看异常信息
+        let table_meta = table_schema
+            .desc_table(table_id, db_name, table_name)
+            .await;
+
+        // 验证基本信息
+        assert_eq!(table_meta.table_id(), table_id);
+        assert_eq!(table_meta.db_name(), db_name);
+        assert_eq!(table_meta.table_name(), table_name);
+
+        // 打印主键信息和表信息
+        println!("Table ID: {}", table_meta.table_id());
+        println!("DB Name: {}", table_meta.db_name());
+        println!("Table Name: {}", table_meta.table_name());
+        println!("Qualified Name: {}", table_meta.qualified_table_name());
+        println!("Primary Key: {}", table_meta.primary_column());
+        println!("Primary Key Position: {}", table_meta.primary_key_position());
+
+        // 尝试获取列信息
+        match table_meta.column(1) {
+            Some(col) => println!("Column 1: {}", col.column_name()),
+            None => println!("No columns found (as expected for nonexistent table)"),
+        }
     }
 }
