@@ -5,6 +5,7 @@ use dashmap::DashMap;
 use moka::sync::Cache;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use tracing::info;
+use tracing::warn;
 
 use crate::binlog::schema::TableMeta;
 use crate::binlog::schema::TableSchema;
@@ -59,8 +60,16 @@ impl BinlogTableMetaHandler {
                     .table_schema
                     .desc_table(event.table_id, &event.database_name, &event.table_name)
                     .await;
-                table_cache.insert(event.table_id, metadata);
-                self.binlog_cache.insert(filename.to_string(), table_cache);
+
+                if let Some(meta) = metadata {
+                    table_cache.insert(event.table_id, meta);
+                    self.binlog_cache.insert(filename.to_string(), table_cache);
+                } else {
+                    warn!(
+                        "failed to get table meta for {}.{} (table may have been deleted), skipping cache and all subsequent operations",
+                        event.database_name, event.table_name
+                    );
+                }
             }
         } else {
             info!("build new binlog table meta cache:{}", &event.table_id);
@@ -68,10 +77,18 @@ impl BinlogTableMetaHandler {
                 .table_schema
                 .desc_table(event.table_id, &event.database_name, &event.table_name)
                 .await;
-            let table_cache = DashMap::new();
-            table_cache.insert(event.table_id, metadata);
-            self.binlog_cache
-                .insert(filename.to_string(), Arc::new(table_cache));
+
+            if let Some(meta) = metadata {
+                let table_cache = DashMap::new();
+                table_cache.insert(event.table_id, meta);
+                self.binlog_cache
+                    .insert(filename.to_string(), Arc::new(table_cache));
+            } else {
+                warn!(
+                    "failed to get table meta for {}.{} (table may have been deleted), skipping cache and all subsequent operations",
+                    event.database_name, event.table_name
+                );
+            }
         }
     }
 

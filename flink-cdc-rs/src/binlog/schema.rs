@@ -29,36 +29,52 @@ impl TableSchema {
         return Ok(TableSchema { pool });
     }
 
-    ///
-    /// TODO 这个有一个场景的bug需要兼容下
-    /// 就是假设一个binlog开头的时候,我们对某个表进行了insert操作,然后
-    /// 在binlog中途对这个表进行删除,那么cdc任务可能延后的时候，就会
-    /// 出现访问这个表不存在了,这个就属于当前访问以前的事情的未知性
-    pub async fn desc_table(&self, table_id: u64, db_name: &str, table_name: &str) -> TableMeta {
+    pub async fn desc_table(
+        &self,
+        table_id: u64,
+        db_name: &str,
+        table_name: &str,
+    ) -> Option<TableMeta> {
         let sql = format!("desc `{}`.{}", db_name, table_name);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
 
         let mut source_position = 1;
         let mut columns = vec![];
-        while let Some(row) = rows.try_next().await.unwrap() {
-            let field: &str = row.try_get("Field").expect("fetch desc table field error!");
-            let key: Result<Vec<u8>, sqlx::Error> = row.try_get("Key");
-            let key = Self::judge_primary_key(key);
 
-            columns.push(ColumnMeta {
-                ordinal_position: source_position,
-                column_name: field.to_string(),
-                is_primaty_key: key,
-            });
-            source_position = source_position + 1;
+        loop {
+            match rows.try_next().await {
+                Ok(Some(row)) => {
+                    let field: &str = match row.try_get("Field") {
+                        Ok(f) => f,
+                        Err(e) => {
+                            warn!("fetch desc table field error: {:?}", e);
+                            return None;
+                        }
+                    };
+                    let key: Result<Vec<u8>, sqlx::Error> = row.try_get("Key");
+                    let key = Self::judge_primary_key(key);
+
+                    columns.push(ColumnMeta {
+                        ordinal_position: source_position,
+                        column_name: field.to_string(),
+                        is_primaty_key: key,
+                    });
+                    source_position = source_position + 1;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    warn!("desc table error for {}.{}: {:?}", db_name, table_name, e);
+                    return None;
+                }
+            }
         }
 
-        return TableMeta::new(
+        return Some(TableMeta::new(
             table_id,
             db_name.to_string(),
             table_name.to_string(),
             columns,
-        );
+        ));
     }
 
     fn judge_primary_key(key: Result<Vec<u8>, sqlx::Error>) -> bool {
@@ -231,7 +247,18 @@ impl<'a> TableMetaHandler<'a> {
                 .table_schema
                 .desc_table(event.table_id, &event.database_name, &event.table_name)
                 .await;
-            self.cache.insert(event.table_id, metadata);
+
+            match metadata {
+                Some(meta) => {
+                    self.cache.insert(event.table_id, meta);
+                }
+                None => {
+                    warn!(
+                        "failed to get table meta for {}.{} (table may have been deleted), skipping cache",
+                        event.database_name, event.table_name
+                    );
+                }
+            }
         }
     }
 
@@ -257,34 +284,19 @@ mod tests {
     async fn test_desc_table_nonexistent_table() {
         let url = "mysql://root:dsap2018@172.16.1.67:3306/mostest_gsms";
 
-        let table_schema = TableSchema::new(url).await.expect("Failed to connect to database");
+        let table_schema = TableSchema::new(url)
+            .await
+            .expect("Failed to connect to database");
 
         let table_id = 999u64;
         let db_name = "mostest_gsms";
         let table_name = "nonexistent_table_xyz";
 
-        // 执行 desc_table - 对于不存在的表，查看异常信息
-        let table_meta = table_schema
-            .desc_table(table_id, db_name, table_name)
-            .await;
+        // 执行 desc_table - 对于不存在的表，应该返回 None
+        let result = table_schema.desc_table(table_id, db_name, table_name).await;
 
-        // 验证基本信息
-        assert_eq!(table_meta.table_id(), table_id);
-        assert_eq!(table_meta.db_name(), db_name);
-        assert_eq!(table_meta.table_name(), table_name);
-
-        // 打印主键信息和表信息
-        println!("Table ID: {}", table_meta.table_id());
-        println!("DB Name: {}", table_meta.db_name());
-        println!("Table Name: {}", table_meta.table_name());
-        println!("Qualified Name: {}", table_meta.qualified_table_name());
-        println!("Primary Key: {}", table_meta.primary_column());
-        println!("Primary Key Position: {}", table_meta.primary_key_position());
-
-        // 尝试获取列信息
-        match table_meta.column(1) {
-            Some(col) => println!("Column 1: {}", col.column_name()),
-            None => println!("No columns found (as expected for nonexistent table)"),
-        }
+        // 验证返回 None（表不存在）
+        assert!(result.is_none(), "Expected None for nonexistent table");
+        println!("Successfully handled nonexistent table, returned None as expected");
     }
 }
