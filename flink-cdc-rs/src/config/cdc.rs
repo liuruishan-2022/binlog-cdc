@@ -411,7 +411,7 @@ impl Pipeline {
     }
 
     pub fn capacity(&self) -> u32 {
-        self.capacity.unwrap_or(10000)
+        self.capacity.unwrap_or(2000)
     }
 }
 

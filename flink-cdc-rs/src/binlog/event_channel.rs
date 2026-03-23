@@ -31,7 +31,7 @@ impl BinlogTableMetaHandler {
         let table_schema = TableSchema::new(&config.source_url()).await?;
         Ok(BinlogTableMetaHandler {
             table_schema,
-            binlog_cache: Cache::new(1000),
+            binlog_cache: Cache::new(100),
             table_include: config.source_table_include(),
         })
     }
