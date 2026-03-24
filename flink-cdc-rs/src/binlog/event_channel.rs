@@ -2,6 +2,7 @@
 /// 使用rust的channel来做线程间的通信
 ///
 use dashmap::DashMap;
+use moka::notification::RemovalCause;
 use moka::policy::EvictionPolicy;
 use moka::sync::Cache;
 use moka::sync::CacheBuilder;
@@ -31,9 +32,14 @@ pub struct BinlogTableMetaHandler {
 impl BinlogTableMetaHandler {
     pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
         let table_schema = TableSchema::new(&config.source_url()).await?;
-        let binlog_cache = CacheBuilder::new(config.source_binlog_cache_size())
+
+        // 创建失效监听器
+        let cache_size = config.source_binlog_cache_size();
+
+        let binlog_cache = CacheBuilder::new(cache_size)
             .eviction_policy(EvictionPolicy::lru())
             .build();
+
         Ok(BinlogTableMetaHandler {
             table_schema,
             binlog_cache: binlog_cache,
