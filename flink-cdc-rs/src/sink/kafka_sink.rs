@@ -66,7 +66,7 @@ impl KafkaSink {
                 .payload(&body);
             match self.producer.send_result(message) {
                 Ok(_) => {
-                    //info!("send message ok,keys:{}!", key);
+                    info!("send message ok,keys:{}!", key);
                 }
                 Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), record)) => {
                     let retry_result = self.producer.send(record, Duration::from_secs(3)).await;
