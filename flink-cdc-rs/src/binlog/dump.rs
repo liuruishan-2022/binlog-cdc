@@ -52,11 +52,13 @@ pub struct Dumper {
     parallelism: u32,
     capacity: u32,
     kafka_sink: Arc<KafkaSink>,
+    metrics: Arc<Metrics>,
 }
 
 impl Dumper {
-    pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
-        let table_meta_handler = BinlogTableMetaHandler::new(config).await?;
+    pub async fn new(config: &FlinkCdc, registry: Arc<Mutex<Registry>>) -> Result<Self, CdcError> {
+        let metrics = Arc::new(metrics(registry).await);
+        let table_meta_handler = BinlogTableMetaHandler::new(config, metrics.clone()).await?;
         let kafka_sink = Arc::new(KafkaSink::build(config));
         Ok(Dumper {
             current_binlog: String::from(""),
@@ -64,15 +66,11 @@ impl Dumper {
             parallelism: config.pipeline_parallelism(),
             capacity: config.pipeline_capacity(),
             kafka_sink,
+            metrics: metrics,
         })
     }
 
-    pub async fn start(
-        &mut self,
-        registry: Arc<Mutex<Registry>>,
-        config: &FlinkCdc,
-    ) -> Result<i32, CdcError> {
-        let metrics = metrics(registry).await;
+    pub async fn start(&mut self, config: &FlinkCdc) -> Result<i32, CdcError> {
         let savepoint = LocalFileSystem::default();
         let binlog_file = savepoint.load().unwrap_or(config.source_binlog_file());
 
@@ -86,61 +84,61 @@ impl Dumper {
             match result {
                 Ok((header, data)) => {
                     //处理binlog event事件对象并且做监控
-                    metrics.stat_binlog_event_timestamp(header.timestamp);
+                    self.metrics.stat_binlog_event_timestamp(header.timestamp);
                     match data {
                         EventData::Rotate(event) => {
                             info!("read new binlog:{}", event.binlog_filename);
                             self.set_binlog_filename(&event.binlog_filename);
                             savepoint.save(&event.binlog_filename);
-                            metrics.inc_flink_mysql_cdc("rotate");
+                            self.metrics.inc_flink_mysql_cdc("rotate");
                         }
                         EventData::TableMap(event) => {
-                            metrics.inc_flink_mysql_cdc("table-map");
+                            self.metrics.inc_flink_mysql_cdc("table-map");
                             self.table_meta_handler
                                 .record_table_meta(&self.current_binlog, event)
                                 .await;
                         }
                         EventData::WriteRows(event) => {
-                            metrics.inc_flink_mysql_cdc("write-rows");
+                            self.metrics.inc_flink_mysql_cdc("write-rows");
                             self.partition_write_event(event, &self.current_binlog, &senders);
                         }
                         EventData::DeleteRows(event) => {
-                            metrics.inc_flink_mysql_cdc("delete-rows");
+                            self.metrics.inc_flink_mysql_cdc("delete-rows");
                             self.partition_delete_event(event, &self.current_binlog, &senders);
                         }
                         EventData::UpdateRows(event) => {
-                            metrics.inc_flink_mysql_cdc("update-rows");
+                            self.metrics.inc_flink_mysql_cdc("update-rows");
                             self.partition_update_event(event, &self.current_binlog, &senders);
                         }
                         EventData::NotSupported => {
-                            metrics.inc_flink_mysql_cdc("not-supported");
+                            self.metrics.inc_flink_mysql_cdc("not-supported");
                         }
                         EventData::FormatDescription(_event) => {
-                            metrics.inc_flink_mysql_cdc("format-description");
+                            self.metrics.inc_flink_mysql_cdc("format-description");
                         }
                         EventData::PreviousGtids(_event) => {
-                            metrics.inc_flink_mysql_cdc("previous-gtids");
+                            self.metrics.inc_flink_mysql_cdc("previous-gtids");
                         }
                         EventData::Gtid(_event) => {
-                            metrics.inc_flink_mysql_cdc("gtid");
+                            self.metrics.inc_flink_mysql_cdc("gtid");
                         }
                         EventData::Query(_event) => {
-                            metrics.inc_flink_mysql_cdc("query");
+                            self.metrics.inc_flink_mysql_cdc("query");
                         }
                         EventData::Xid(_event) => {
-                            metrics.inc_flink_mysql_cdc("xid");
+                            self.metrics.inc_flink_mysql_cdc("xid");
                         }
                         EventData::XaPrepare(_event) => {
-                            metrics.inc_flink_mysql_cdc("xa-prepare");
+                            self.metrics.inc_flink_mysql_cdc("xa-prepare");
                         }
                         EventData::TransactionPayload(_event) => {
-                            metrics.inc_flink_mysql_cdc("transaction-payload");
+                            self.metrics.inc_flink_mysql_cdc("transaction-payload");
                         }
                         EventData::RowsQuery(_event) => {
-                            metrics.inc_flink_mysql_cdc("rows-query");
+                            self.metrics.inc_flink_mysql_cdc("rows-query");
                         }
                         EventData::HeartBeat => {
-                            metrics.inc_flink_mysql_cdc("heart-beat");
+                            self.metrics.inc_flink_mysql_cdc("heart-beat");
                         }
                     }
                 }

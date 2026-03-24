@@ -10,6 +10,7 @@ use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use tracing::info;
 use tracing::warn;
 
+use crate::binlog::Metrics;
 use crate::binlog::schema::TableMeta;
 use crate::binlog::schema::TableSchema;
 use crate::common::CdcError;
@@ -27,10 +28,11 @@ pub struct BinlogTableMetaHandler {
     table_schema: TableSchema,
     binlog_cache: Cache<String, Arc<BinlogTableMeta>>,
     table_include: TableInclude,
+    metrics: Arc<Metrics>,
 }
 
 impl BinlogTableMetaHandler {
-    pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
+    pub async fn new(config: &FlinkCdc, metrics: Arc<Metrics>) -> Result<Self, CdcError> {
         let table_schema = TableSchema::new(&config.source_url()).await?;
 
         // 创建失效监听器
@@ -44,6 +46,7 @@ impl BinlogTableMetaHandler {
             table_schema,
             binlog_cache: binlog_cache,
             table_include: config.source_table_include(),
+            metrics: metrics,
         })
     }
 
@@ -71,6 +74,8 @@ impl BinlogTableMetaHandler {
                     .table_schema
                     .desc_table(event.table_id, &event.database_name, &event.table_name)
                     .await;
+                self.metrics
+                    .inc_flink_mysql_desc_table(&event.database_name);
 
                 if let Some(meta) = metadata {
                     table_cache.insert(event.table_id, meta);
@@ -88,6 +93,8 @@ impl BinlogTableMetaHandler {
                 .table_schema
                 .desc_table(event.table_id, &event.database_name, &event.table_name)
                 .await;
+            self.metrics
+                .inc_flink_mysql_desc_table(&event.database_name);
 
             if let Some(meta) = metadata {
                 let table_cache = DashMap::new();
