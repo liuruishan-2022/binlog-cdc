@@ -75,6 +75,10 @@ impl FlinkCdc {
         self.source.update_source_keep()
     }
 
+    pub fn source_binlog_cache_size(&self) -> u64 {
+        self.source.binlog_cache_size()
+    }
+
     ///
     /// 获取sink相关的信息配置
     ///
@@ -173,6 +177,8 @@ pub struct Source {
     keep_alive_interval_ms: Option<u64>,
     #[serde(rename = "debezium.properties.update.source.keep")]
     update_source_keep: Option<bool>,
+    #[serde(rename = "debezium.properties.binlog.cache.size")]
+    binlog_cache_size: Option<u64>,
 }
 
 impl Source {
@@ -283,6 +289,12 @@ impl Source {
     /// 获取是否在 UPDATE 事件中保留 source 字段，默认为 true
     pub fn update_source_keep(&self) -> bool {
         self.update_source_keep.unwrap_or(true)
+    }
+
+    ///
+    /// 获取 binlog 缓存大小，默认为 100
+    pub fn binlog_cache_size(&self) -> u64 {
+        self.binlog_cache_size.unwrap_or(100)
     }
 }
 
@@ -577,5 +589,68 @@ information_schema.*,cpaas_mos.*,dify-test.*,dsap2.2.6.*,federated_link.*,hw2-ms
         let includes = TableInclude::create(includes);
         assert!(includes.can_include("app_db", "user"));
         assert!(includes.can_include("dsap2.2.6", "user"));
+    }
+
+    #[test]
+    fn test_binlog_cache_size_default() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+  scan.startup.specific-offset.pos: 154
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let config = FlinkCdc::from_str(config);
+        assert_eq!(config.source_binlog_cache_size(), 100);
+    }
+
+    #[test]
+    fn test_binlog_cache_size_custom() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+  scan.startup.specific-offset.pos: 154
+  debezium.properties.binlog.cache.size: 200
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let config = FlinkCdc::from_str(config);
+        assert_eq!(config.source_binlog_cache_size(), 200);
     }
 }

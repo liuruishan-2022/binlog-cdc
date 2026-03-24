@@ -105,3 +105,81 @@ impl BinlogTableMetaHandler {
             .map(|r| r.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{thread, time::Duration};
+
+    use moka::{policy::EvictionPolicy, sync::Cache};
+    use tracing::info;
+    use tracing_subscriber::fmt;
+
+    fn init() {
+        fmt().init();
+    }
+
+    #[test]
+    fn test_cache_limit() {
+        init();
+        let cache = Cache::builder()
+            .max_capacity(40)
+            .eviction_policy(EvictionPolicy::lru())
+            .build();
+
+        info!("初始缓存的个数:{}!", cache.entry_count());
+
+        // 插入 100 个元素
+        for index in 1..=100 {
+            cache.insert(format!("index-el:{}", index), String::from("test"));
+        }
+
+        info!("插入后立即查看缓存的个数:{}!", cache.entry_count());
+
+        // 处理待办任务
+        cache.run_pending_tasks();
+
+        info!("run_pending_tasks 后缓存的个数:{}!", cache.entry_count());
+
+        // 统计存在和不存在的 key
+        let mut missing = vec![];
+        let mut existing = vec![];
+
+        for i in 1..=100 {
+            if !cache.contains_key(format!("index-el:{}", i).as_str()) {
+                missing.push(i);
+            } else {
+                existing.push(i);
+            }
+        }
+
+        info!(
+            "总结: 存在={} 个, 不存在={} 个",
+            existing.len(),
+            missing.len()
+        );
+        info!("不存在的 keys: {:?}", missing);
+        info!(
+            "存在的 keys 范围: {:?}...{:?}",
+            existing.first(),
+            existing.last()
+        );
+
+        // 插入第 101 个元素
+        cache.insert("index-el:101".to_string(), "test".to_string());
+
+        // 检查 index-el:61 和 index-el:62
+        info!("index-el:61 存在: {}", cache.contains_key("index-el:61"));
+        info!("index-el:62 存在: {}", cache.contains_key("index-el:62"));
+        info!("index-el:101 存在: {}", cache.contains_key("index-el:101"));
+
+        // 统计当前存在的所有 keys
+        let mut current_keys = vec![];
+        for i in 61..=101 {
+            if cache.contains_key(format!("index-el:{}", i).as_str()) {
+                current_keys.push(i);
+            }
+        }
+        info!("当前存在的 keys: {:?}", current_keys);
+        info!("当前缓存个数: {}", cache.entry_count());
+    }
+}
