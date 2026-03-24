@@ -2,7 +2,9 @@
 /// 使用rust的channel来做线程间的通信
 ///
 use dashmap::DashMap;
+use moka::policy::EvictionPolicy;
 use moka::sync::Cache;
+use moka::sync::CacheBuilder;
 use mysql_binlog_connector_rust::event::table_map_event::TableMapEvent;
 use tracing::info;
 use tracing::warn;
@@ -29,9 +31,12 @@ pub struct BinlogTableMetaHandler {
 impl BinlogTableMetaHandler {
     pub async fn new(config: &FlinkCdc) -> Result<Self, CdcError> {
         let table_schema = TableSchema::new(&config.source_url()).await?;
+        let binlog_cache = CacheBuilder::new(config.source_binlog_cache_size())
+            .eviction_policy(EvictionPolicy::lru())
+            .build();
         Ok(BinlogTableMetaHandler {
             table_schema,
-            binlog_cache: Cache::new(100),
+            binlog_cache: binlog_cache,
             table_include: config.source_table_include(),
         })
     }
