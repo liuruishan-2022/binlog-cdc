@@ -2,7 +2,6 @@
 /// 使用rust的channel来做线程间的通信
 ///
 use dashmap::DashMap;
-use moka::notification::RemovalCause;
 use moka::policy::EvictionPolicy;
 use moka::sync::Cache;
 use moka::sync::CacheBuilder;
