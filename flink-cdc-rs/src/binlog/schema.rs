@@ -163,6 +163,14 @@ impl TableMeta {
         self.primary_key_position
     }
 
+    pub fn primary_index(&self) -> usize {
+        if self.primary_key_position <= 0 {
+            return 0;
+        } else {
+            return (self.primary_key_position - 1) as usize;
+        }
+    }
+
     pub fn qualified_table_name(&self) -> String {
         format!("{}.{}", self.db_name, self.table_name)
     }
@@ -298,5 +306,64 @@ mod tests {
         // 验证返回 None（表不存在）
         assert!(result.is_none(), "Expected None for nonexistent table");
         println!("Successfully handled nonexistent table, returned None as expected");
+    }
+
+    /// 测试 primary_index 方法
+    /// 验证: 如果 primary_key_position <= 0 则返回 0, 否则返回 primary_key_position - 1
+    #[test]
+    fn test_primary_index() {
+        // 由于 TableMeta::new 会自动设置 primary_key_position，我们直接创建测试实例
+        // 这里使用 TableMeta 的构造方式，我们需要先查看如何设置 primary_key_position
+        // 让我们通过 clone 和直接修改来测试
+
+        // 测试用例 1: primary_key_position = 0, 期望返回 0
+        // 由于字段是私有的，我们需要通过构造函数创建具有特定 primary_key_position 的实例
+
+        // 实际上，由于 primary_key_position 是私有字段，���们需要添加一个测试辅助方法
+        // 或者使用 new 函数并创建不同 primary_key_position 的场景
+
+        // 为了测试，我们可以创建实际的表结构
+        // 这里测试的是逻辑，primary_key_position 为 0 时应返回 0
+        let columns = vec![
+            ColumnMeta::new(1, "id".to_string(), false),
+            ColumnMeta::new(2, "name".to_string(), false),
+        ];
+
+        // 创建没有主键的表（primary_key_position = 0）
+        let table_meta_no_pk = TableMeta {
+            table_id: 1u64,
+            db_name: "test_db".to_string(),
+            table_name: "test_table".to_string(),
+            columns: columns.clone().into_iter().map(|c| (c.ordinal_position, c)).collect(),
+            primary_key: String::new(),
+            primary_key_position: 0u32,
+        };
+
+        // 测试 primary_key_position = 0
+        assert_eq!(table_meta_no_pk.primary_index(), 0, "primary_key_position=0 should return 0");
+
+        // 测试 primary_key_position = 1, 应返回 0
+        let table_meta_pk_first = TableMeta {
+            table_id: 1u64,
+            db_name: "test_db".to_string(),
+            table_name: "test_table".to_string(),
+            columns: columns.clone().into_iter().map(|c| (c.ordinal_position, c)).collect(),
+            primary_key: "id".to_string(),
+            primary_key_position: 1u32,
+        };
+        assert_eq!(table_meta_pk_first.primary_index(), 0, "primary_key_position=1 should return 0");
+
+        // 测试 primary_key_position = 2, 应返回 1
+        let table_meta_pk_second = TableMeta {
+            table_id: 1u64,
+            db_name: "test_db".to_string(),
+            table_name: "test_table".to_string(),
+            columns: columns.into_iter().map(|c| (c.ordinal_position, c)).collect(),
+            primary_key: "name".to_string(),
+            primary_key_position: 2u32,
+        };
+        assert_eq!(table_meta_pk_second.primary_index(), 1, "primary_key_position=2 should return 1");
+
+        println!("All primary_index tests passed!");
     }
 }
