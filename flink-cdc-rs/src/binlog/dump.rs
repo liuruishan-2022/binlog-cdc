@@ -184,20 +184,19 @@ impl Dumper {
 
         if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
             event.rows.into_iter().for_each(|row| {
-                if let Some(primary_key) = row
-                    .column_values
-                    .get(table_meta.primary_key_position() as usize)
-                {
+                let primary_index = table_meta.primary_key_position() - 1;
+                if let Some(primary_key) = row.column_values.get(primary_index as usize) {
                     let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
                         .to_string();
                     let mut hasher = DefaultHasher::new();
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
                     let sender_idx = hash_code as usize % sender_count;
-                    info!("key:{}, sender:{}", key, sender_idx);
-                    let sender = senders
-                        .get(sender_idx)
-                        .expect("fetch sender error");
+                    info!(
+                        "key:{}, sender:{} primary index:{}",
+                        key, sender_idx, primary_index
+                    );
+                    let sender = senders.get(sender_idx).expect("fetch sender error");
 
                     let partition_event = WriteRowsEvent {
                         table_id: event.table_id,
@@ -239,9 +238,7 @@ impl Dumper {
                     let hash_code = hasher.finish();
                     let sender_idx = hash_code as usize % sender_count;
                     info!("key:{}, sender:{}", key, sender_idx);
-                    let sender = senders
-                        .get(sender_idx)
-                        .expect("fetch sender error");
+                    let sender = senders.get(sender_idx).expect("fetch sender error");
 
                     let partition_event = DeleteRowsEvent {
                         table_id: event.table_id,
