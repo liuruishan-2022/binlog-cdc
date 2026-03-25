@@ -341,7 +341,7 @@ impl Dumper {
                         _ => {}
                     }
                 }
-                info!("Receiver channel closed, exiting receiver task");
+                info!("receiver channel closed, exiting receiver task");
             });
         });
     }
