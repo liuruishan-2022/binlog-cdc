@@ -149,7 +149,6 @@ impl Dumper {
                 // 2. UnexpectedData("Read binlog header timeout after 10s while waiting for packet header")
                 // 目前发现生产有这个问题: 处理这个问题
                 Err(BinlogError::IoError(err)) => {
-                    //在Mysql重启的时候,无法做到重新连接的操作
                     warn!(
                         "read binlog error:{:?} we will retry 3 times to reconnection!",
                         err
