@@ -192,7 +192,6 @@ impl Dumper {
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
                     let sender = hash_code as usize % sender_count;
-                    info!("key:{}, sender:{}", key, sender);
                     let sender = senders.get(sender).expect("fetch sender error");
 
                     let partition_event = WriteRowsEvent {
@@ -232,7 +231,6 @@ impl Dumper {
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
                     let sender = hash_code as usize % sender_count;
-                    info!("key:{}, sender:{}", key, sender);
                     let sender = senders.get(sender).expect("fetch sender error");
 
                     let partition_event = DeleteRowsEvent {
@@ -272,7 +270,6 @@ impl Dumper {
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
                     let sender = hash_code as usize % sender_count;
-                    info!("key:{}, sender:{}", key, sender);
                     let sender = senders.get(sender).expect("fetch sender error");
 
                     let partition_event = UpdateRowsEvent {
