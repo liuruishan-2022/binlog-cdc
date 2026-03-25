@@ -34,7 +34,7 @@ pub async fn start_dump(
     registry: Arc<Mutex<Registry>>,
     config: &FlinkCdc,
 ) -> Result<i32, CdcError> {
-    if std::env::var("CHANNEL").is_ok() {
+    if !std::env::var("CHANNEL").is_ok() {
         info!("使用了channel的模式来处理");
         let mut dumper = Dumper::new(config, registry).await?;
         dumper.start(config).await?;

@@ -193,8 +193,10 @@ impl Dumper {
                     let mut hasher = DefaultHasher::new();
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
+                    let sender_idx = hash_code as usize % sender_count;
+                    info!("key:{}, sender:{}", key, sender_idx);
                     let sender = senders
-                        .get(hash_code as usize % sender_count)
+                        .get(sender_idx)
                         .expect("fetch sender error");
 
                     let partition_event = WriteRowsEvent {
@@ -235,8 +237,10 @@ impl Dumper {
                     let mut hasher = DefaultHasher::new();
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
+                    let sender_idx = hash_code as usize % sender_count;
+                    info!("key:{}, sender:{}", key, sender_idx);
                     let sender = senders
-                        .get(hash_code as usize % sender_count)
+                        .get(sender_idx)
                         .expect("fetch sender error");
 
                     let partition_event = DeleteRowsEvent {
@@ -268,7 +272,6 @@ impl Dumper {
 
         if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
             event.rows.into_iter().for_each(|(before, after)| {
-                // 使用 before 行的 primary_key 来确定路由
                 if let Some(primary_key) = before
                     .column_values
                     .get(table_meta.primary_key_position() as usize)
@@ -278,9 +281,9 @@ impl Dumper {
                     let mut hasher = DefaultHasher::new();
                     key.hash(&mut hasher);
                     let hash_code = hasher.finish();
-                    let sender = senders
-                        .get(hash_code as usize % sender_count)
-                        .expect("fetch sender error");
+                    let sender = hash_code as usize % sender_count;
+                    info!("key:{}, sender:{}", key, sender);
+                    let sender = senders.get(sender).expect("fetch sender error");
 
                     let partition_event = UpdateRowsEvent {
                         table_id: event.table_id,
