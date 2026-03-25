@@ -184,7 +184,7 @@ impl Dumper {
 
         if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
             event.rows.into_iter().for_each(|row| {
-                let primary_index = table_meta.primary_key_position() - 1;
+                let primary_index = table_meta.primary_index();
                 if let Some(primary_key) = row.column_values.get(primary_index as usize) {
                     let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
                         .to_string();
@@ -224,7 +224,7 @@ impl Dumper {
 
         if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
             event.rows.into_iter().for_each(|row| {
-                let primary_index = table_meta.primary_key_position() - 1;
+                let primary_index = table_meta.primary_index();
                 if let Some(primary_key) = row.column_values.get(primary_index as usize) {
                     let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
                         .to_string();
@@ -264,7 +264,7 @@ impl Dumper {
 
         if let Some(table_meta) = self.table_meta_handler.table_schema(binlog, event.table_id) {
             event.rows.into_iter().for_each(|(before, after)| {
-                let primary_index = table_meta.primary_key_position() - 1;
+                let primary_index = table_meta.primary_index();
                 if let Some(primary_key) = before.column_values.get(primary_index as usize) {
                     let key = BinlogRowEventHandler::convert_column_value_to_json(primary_key)
                         .to_string();
