@@ -7,6 +7,8 @@ use mysql_binlog_connector_rust::{
         update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
     },
 };
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tracing::warn;
@@ -78,7 +80,7 @@ impl<'a> RowEventHandler<'a> {
                 self.projection
                     .eval(&table_meta.qualified_table_name(), &mut after);
                 DebeziumFormat::update(
-                    json!(before),
+                    Some(json!(before)),
                     json!(after),
                     table_meta.db_name(),
                     table_meta.table_name(),
@@ -115,6 +117,9 @@ impl<'a> RowEventHandler<'a> {
         // 根据环境变量 RSKAFKA 决定使用哪个 sink
         // 如果设置了环境变量 RSKAFKA，则使用 rskafka_sink
         // 否则使用传统的 kafka_sink (rdkafka)
+        if std::env::var("NOKAFKA").is_ok() {
+            return;
+        }
         if std::env::var("RSKAFKA").is_ok() {
             self.rskafka_sink.send_messages(debezium).await;
         } else {
@@ -124,7 +129,7 @@ impl<'a> RowEventHandler<'a> {
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {
         return rows
-            .into_iter()
+            .into_par_iter()
             .map(|row| self.convert_and_parse_row(table_meta, row))
             .collect::<Vec<Map<String, Value>>>();
     }
@@ -226,7 +231,7 @@ impl<'a> RowEventHandler<'a> {
 ///
 /// Debezium的JSON格式的数据结构对象
 ///
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct DebeziumFormat {
     before: Option<Value>,
     after: Option<Value>,
@@ -250,9 +255,9 @@ impl DebeziumFormat {
         }
     }
 
-    pub fn update(before: Value, after: Value, db: &str, table: &str, key: MessageKey) -> Self {
+    pub fn update(before: Option<Value>, after: Value, db: &str, table: &str, key: MessageKey) -> Self {
         DebeziumFormat {
-            before: Some(before),
+            before: before,
             after: Some(after),
             op: "u".to_string(),
             source: DebeziumSource {
@@ -304,15 +309,15 @@ impl DebeziumFormat {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct DebeziumSource {
     db: String,
     table: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct MessageKey {
-    keys: Map<String, Value>,
+    pub keys: Map<String, Value>,
 }
 
 impl MessageKey {

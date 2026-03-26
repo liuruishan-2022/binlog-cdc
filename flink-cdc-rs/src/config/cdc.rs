@@ -71,6 +71,14 @@ impl FlinkCdc {
         self.source.connect_max_retries()
     }
 
+    pub fn source_update_source_keep(&self) -> bool {
+        self.source.update_source_keep()
+    }
+
+    pub fn source_binlog_cache_size(&self) -> u64 {
+        self.source.binlog_cache_size()
+    }
+
     ///
     /// 获取sink相关的信息配置
     ///
@@ -120,6 +128,10 @@ impl FlinkCdc {
         self.pipeline.parallelism()
     }
 
+    pub fn pipeline_capacity(&self) -> u32 {
+        self.pipeline.capacity()
+    }
+
     ///
     /// route信息的获取
     pub fn route_sink(&self, source: &str) -> Option<String> {
@@ -163,6 +175,10 @@ pub struct Source {
     connect_timeout: Option<Duration>,
     #[serde(rename = "debezium.properties.keep.alive.interval.ms")]
     keep_alive_interval_ms: Option<u64>,
+    #[serde(rename = "debezium.properties.update.source.keep")]
+    update_source_keep: Option<bool>,
+    #[serde(rename = "debezium.properties.binlog.cache.size")]
+    binlog_cache_size: Option<u64>,
 }
 
 impl Source {
@@ -268,6 +284,18 @@ impl Source {
     fn connect_max_retries(&self) -> u32 {
         self.connect_max_retries.unwrap_or(3)
     }
+
+    ///
+    /// 获取是否在 UPDATE 事件中保留 source 字段，默认为 true
+    pub fn update_source_keep(&self) -> bool {
+        self.update_source_keep.unwrap_or(true)
+    }
+
+    ///
+    /// 获取 binlog 缓存大小，默认为 100
+    pub fn binlog_cache_size(&self) -> u64 {
+        self.binlog_cache_size.unwrap_or(100)
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -365,6 +393,8 @@ impl Route {
 pub struct Pipeline {
     name: String,
     parallelism: u32,
+    #[serde(rename = "channel.capacity")]
+    capacity: Option<u32>,
 }
 
 impl Pipeline {
@@ -373,7 +403,27 @@ impl Pipeline {
     }
 
     pub fn parallelism(&self) -> u32 {
+        // tokio worker threads 为 12，如果 parallelism >= 12，则限制为 6 避免死锁
+        const TOKIO_WORKERS: u32 = 12;
+
+        if self.parallelism <= 0 {
+            return 6;
+        }
+
+        if self.parallelism >= TOKIO_WORKERS {
+            tracing::warn!(
+                "parallelism {} is >= tokio workers {}, limiting to 6 to avoid deadlock",
+                self.parallelism,
+                TOKIO_WORKERS
+            );
+            return 6;
+        }
+
         self.parallelism
+    }
+
+    pub fn capacity(&self) -> u32 {
+        self.capacity.unwrap_or(2000)
     }
 }
 
@@ -537,7 +587,70 @@ pipeline:
         let includes = "
 information_schema.*,cpaas_mos.*,dify-test.*,dsap2.2.6.*,federated_link.*,hw2-msmp.*,mos2_gsms.*,mos6.2.1_list.*,mos_nacos1.4.*,mostest_gsms.*,mosxn_gsms.*,mosxn_list.*,mysql.*,nacos_sync.*,performance_schema.*,simulate.*,slow_query_log.*,srcp.*,stc.*,sys.*,temp_db.*,tmt_atest_cpaas.*,tmt_atest_mosgsms.*,tmt_atest_moslist.*,tmt_atest_nacos.*,tmt_atest_xxl_job.*,tmt_simulate.*,xxl_job_mos.*,xxl_job_xn.*,zhang.*,zxy_sms.*";
         let includes = TableInclude::create(includes);
-        assert!(includes.can_include("app_db", "user"));
         assert!(includes.can_include("dsap2.2.6", "user"));
+        assert!(includes.can_include("mysql", "user"));
+    }
+
+    #[test]
+    fn test_binlog_cache_size_default() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+  scan.startup.specific-offset.pos: 154
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let config = FlinkCdc::from_str(config);
+        assert_eq!(config.source_binlog_cache_size(), 100);
+    }
+
+    #[test]
+    fn test_binlog_cache_size_custom() {
+        let config = r#"
+source:
+  type: mysql
+  hostname: localhost
+  port: 3306
+  username: root
+  password: 123456
+  tables: app_db.\.*
+  server-id: 5400-5404
+  server-time-zone: UTC
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: mysql-bin.000003
+  scan.startup.specific-offset.pos: 154
+  debezium.properties.binlog.cache.size: 200
+
+sink:
+  type: kafka
+  name: Kafka-Sink
+  properties.bootstrap.servers: localhost:9092
+  properties.compression.type: lz4
+  topic: default-topic
+
+pipeline:
+  name: Sync MySQL Database to Doris
+  parallelism: 2
+        "#;
+        let config = FlinkCdc::from_str(config);
+        assert_eq!(config.source_binlog_cache_size(), 200);
     }
 }
