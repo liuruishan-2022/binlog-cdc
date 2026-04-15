@@ -255,7 +255,13 @@ impl DebeziumFormat {
         }
     }
 
-    pub fn update(before: Option<Value>, after: Value, db: &str, table: &str, key: MessageKey) -> Self {
+    pub fn update(
+        before: Option<Value>,
+        after: Value,
+        db: &str,
+        table: &str,
+        key: MessageKey,
+    ) -> Self {
         DebeziumFormat {
             before: before,
             after: Some(after),

@@ -91,11 +91,7 @@ impl PipelineMessage {
     }
 
     pub fn source_table_name(&self) -> Option<&str> {
-        self.routes
-            .first()?
-            .source_table
-            .split('.')
-            .last()
+        self.routes.first()?.source_table.split('.').last()
     }
 
     pub fn to_json(&self) -> Result<String, serde_json::Error> {

@@ -104,12 +104,8 @@ impl KafkaSource {
                     // 启动任务，将 partition_client 包装在 Arc 中以便共享
                     let partition_client = Arc::new(partition_client);
                     let task = tokio::spawn(async move {
-                        Self::consume_partition(
-                            partition_client,
-                            topic_name_clone,
-                            partition_id,
-                        )
-                        .await;
+                        Self::consume_partition(partition_client, topic_name_clone, partition_id)
+                            .await;
                     });
 
                     tasks.push(task);

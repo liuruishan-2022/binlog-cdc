@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::MySql;
 use sqlx::Row;
 use sqlx::mysql::MySqlPoolOptions;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
@@ -200,7 +200,11 @@ impl MySqlSink {
             .join("@")
     }
 
-    async fn get_table_meta(&self, database: &str, table: &str) -> Result<TableMeta, Box<dyn std::error::Error>> {
+    async fn get_table_meta(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> Result<TableMeta, Box<dyn std::error::Error>> {
         let key = format!("{}.{}", database, table);
 
         if let Some(meta) = self.cache.get(&key).await {
@@ -214,7 +218,11 @@ impl MySqlSink {
         Ok(meta)
     }
 
-    async fn desc_table(&self, database: &str, table: &str) -> Result<TableMeta, Box<dyn std::error::Error>> {
+    async fn desc_table(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> Result<TableMeta, Box<dyn std::error::Error>> {
         let sql = format!("DESC `{}`.`{}`", database, table);
         let pool = self.pool.as_ref().ok_or("Pool not initialized")?;
 
@@ -235,7 +243,11 @@ impl MySqlSink {
             return Err(format!("Table {}.{} has no columns", database, table).into());
         }
 
-        Ok(TableMeta::new(database.to_string(), table.to_string(), columns))
+        Ok(TableMeta::new(
+            database.to_string(),
+            table.to_string(),
+            columns,
+        ))
     }
 
     fn judge_primary_key(key: Result<Vec<u8>, sqlx::Error>) -> bool {
@@ -263,7 +275,11 @@ impl MySqlSink {
         }
     }
 
-    async fn process_message(&self, msg: &PipelineMessage, route_info: &RouteInfo) -> Result<(), Box<dyn std::error::Error>> {
+    async fn process_message(
+        &self,
+        msg: &PipelineMessage,
+        route_info: &RouteInfo,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (database, table) = Self::parse_sink_table(route_info.sink_table())?;
         let table_meta = self.get_table_meta(&database, &table).await?;
 
@@ -277,7 +293,11 @@ impl MySqlSink {
         Ok(())
     }
 
-    async fn execute_insert(&self, table_meta: &TableMeta, data: &DebeziumFormat) -> Result<(), Box<dyn std::error::Error>> {
+    async fn execute_insert(
+        &self,
+        table_meta: &TableMeta,
+        data: &DebeziumFormat,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let pool = self.pool.as_ref().ok_or("Pool not initialized")?;
 
         let columns = table_meta.all_columns();
@@ -327,7 +347,11 @@ impl MySqlSink {
         Ok(())
     }
 
-    async fn execute_delete(&self, table_meta: &TableMeta, data: &DebeziumFormat) -> Result<(), Box<dyn std::error::Error>> {
+    async fn execute_delete(
+        &self,
+        table_meta: &TableMeta,
+        data: &DebeziumFormat,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let pool = self.pool.as_ref().ok_or("Pool not initialized")?;
 
         let keys = &table_meta.primary_keys;
@@ -383,7 +407,11 @@ impl MySqlSink {
         Ok(())
     }
 
-    async fn execute_update(&self, table_meta: &TableMeta, data: &DebeziumFormat) -> Result<(), Box<dyn std::error::Error>> {
+    async fn execute_update(
+        &self,
+        table_meta: &TableMeta,
+        data: &DebeziumFormat,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let pool = self.pool.as_ref().ok_or("Pool not initialized")?;
 
         let keys = &table_meta.primary_keys;
@@ -521,7 +549,8 @@ impl Sink for MySqlSink {
             if let Err(e) = self.process_message(&msg, route_info).await {
                 error!(
                     "Error processing message for route {}: {}",
-                    route_info.sink_table(), e
+                    route_info.sink_table(),
+                    e
                 );
             }
         }

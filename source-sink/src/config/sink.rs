@@ -28,7 +28,10 @@ pub struct KafkaSinkConfig {
     #[serde(rename = "properties.bootstrap.servers")]
     pub bootstrap_servers: Vec<String>,
 
-    #[serde(rename = "properties.compression.type", default = "default_compression")]
+    #[serde(
+        rename = "properties.compression.type",
+        default = "default_compression"
+    )]
     pub compression_type: String,
 
     pub topic: String,
@@ -67,11 +70,7 @@ fn default_linger() -> u32 {
 }
 
 impl KafkaSinkConfig {
-    pub fn new(
-        name: String,
-        bootstrap_servers: Vec<String>,
-        topic: String,
-    ) -> Self {
+    pub fn new(name: String, bootstrap_servers: Vec<String>, topic: String) -> Self {
         Self {
             name,
             bootstrap_servers,

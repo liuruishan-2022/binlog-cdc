@@ -9,11 +9,7 @@ use prometheus_client::{
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::{
-    binlog::dump::Dumper,
-    common::CdcError,
-    config::cdc::FlinkCdc,
-};
+use crate::{binlog::dump::Dumper, common::CdcError, config::cdc::FlinkCdc};
 
 pub mod dump;
 pub mod event_channel;

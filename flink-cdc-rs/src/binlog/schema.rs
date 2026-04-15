@@ -334,35 +334,58 @@ mod tests {
             table_id: 1u64,
             db_name: "test_db".to_string(),
             table_name: "test_table".to_string(),
-            columns: columns.clone().into_iter().map(|c| (c.ordinal_position, c)).collect(),
+            columns: columns
+                .clone()
+                .into_iter()
+                .map(|c| (c.ordinal_position, c))
+                .collect(),
             primary_key: String::new(),
             primary_key_position: 0u32,
         };
 
         // 测试 primary_key_position = 0
-        assert_eq!(table_meta_no_pk.primary_index(), 0, "primary_key_position=0 should return 0");
+        assert_eq!(
+            table_meta_no_pk.primary_index(),
+            0,
+            "primary_key_position=0 should return 0"
+        );
 
         // 测试 primary_key_position = 1, 应返回 0
         let table_meta_pk_first = TableMeta {
             table_id: 1u64,
             db_name: "test_db".to_string(),
             table_name: "test_table".to_string(),
-            columns: columns.clone().into_iter().map(|c| (c.ordinal_position, c)).collect(),
+            columns: columns
+                .clone()
+                .into_iter()
+                .map(|c| (c.ordinal_position, c))
+                .collect(),
             primary_key: "id".to_string(),
             primary_key_position: 1u32,
         };
-        assert_eq!(table_meta_pk_first.primary_index(), 0, "primary_key_position=1 should return 0");
+        assert_eq!(
+            table_meta_pk_first.primary_index(),
+            0,
+            "primary_key_position=1 should return 0"
+        );
 
         // 测试 primary_key_position = 2, 应返回 1
         let table_meta_pk_second = TableMeta {
             table_id: 1u64,
             db_name: "test_db".to_string(),
             table_name: "test_table".to_string(),
-            columns: columns.into_iter().map(|c| (c.ordinal_position, c)).collect(),
+            columns: columns
+                .into_iter()
+                .map(|c| (c.ordinal_position, c))
+                .collect(),
             primary_key: "name".to_string(),
             primary_key_position: 2u32,
         };
-        assert_eq!(table_meta_pk_second.primary_index(), 1, "primary_key_position=2 should return 1");
+        assert_eq!(
+            table_meta_pk_second.primary_index(),
+            1,
+            "primary_key_position=2 should return 1"
+        );
 
         println!("All primary_index tests passed!");
     }
