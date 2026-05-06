@@ -80,13 +80,11 @@ impl KafkaSink {
         };
         let producer = self.producer(topic, random_partition).await;
 
-        if self.config.cdc().is_send_to_kafka() {
-            if let Err(e) = producer
-                .produce(records, rskafka::client::partition::Compression::Lz4)
-                .await
-            {
-                warn!("发送消息失败:{:?}", e);
-            }
+        if let Err(e) = producer
+            .produce(records, rskafka::client::partition::Compression::Lz4)
+            .await
+        {
+            warn!("发送消息失败:{:?}", e);
         }
     }
 }

@@ -45,8 +45,6 @@ pub struct Cdc {
     #[serde(rename = "producer-threads")]
     producer_threads: Option<u32>,
     routes: Vec<Route>,
-    #[serde(rename = "send-to-kafka")]
-    send_to_kafka: Option<bool>,
 }
 
 impl Cdc {
@@ -54,7 +52,6 @@ impl Cdc {
     const DEFAULT_PARALLELISM: u32 = 4;
     const DEFAULT_CHANNEL_CAPACITY: u32 = 1_000_000;
     const DEFAULT_PRODUCER_THREADS: u32 = 4;
-    const DEFAULT_SEND_TO_KAFKA: bool = false;
 
     pub fn parallelism(&self) -> u32 {
         self.parallelism.unwrap_or(Self::DEFAULT_PARALLELISM)
@@ -80,10 +77,6 @@ impl Cdc {
     pub fn producer_threads(&self) -> u32 {
         self.producer_threads
             .unwrap_or(Self::DEFAULT_PRODUCER_THREADS)
-    }
-
-    pub fn is_send_to_kafka(&self) -> bool {
-        self.send_to_kafka.unwrap_or(Self::DEFAULT_SEND_TO_KAFKA)
     }
 
     pub fn routes(&self) -> &[Route] {

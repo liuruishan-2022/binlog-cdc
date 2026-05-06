@@ -1,2 +1,3 @@
-pub mod kafka_source;
-pub mod mysql_source;
+pub mod kafka;
+pub mod mysql;
+pub mod mysqldump;
