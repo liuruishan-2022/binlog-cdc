@@ -23,7 +23,7 @@ use crate::{
     common::CdcError,
     config::cdc::FlinkCdc,
     savepoint::{SavePoints, local::LocalFileSystem},
-    sink::kafka_sink::KafkaSink,
+    sink::kafka::KafkaSink,
     transform::parser::ProjectionHandler,
 };
 

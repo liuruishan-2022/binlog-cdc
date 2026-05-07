@@ -16,7 +16,7 @@ use tracing::warn;
 use crate::{
     binlog::{Metrics, schema::TableMeta},
     config::cdc::FlinkCdc,
-    sink::kafka_sink::{KafkaSink, RskafkaSink},
+    sink::kafka::{KafkaSink, RskafkaSink},
     transform::parser::ProjectionHandler,
 };
 

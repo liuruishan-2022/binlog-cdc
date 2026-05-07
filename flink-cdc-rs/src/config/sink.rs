@@ -11,6 +11,25 @@ pub enum Sink {
     Kafka(Kafka),
     #[serde(rename = "mysql")]
     Mysql(Mysql),
+    #[serde(rename = "console")]
+    Console(Console),
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Console {
+    name: String,
+}
+
+impl Console {
+    pub fn new(name: &str) -> Self {
+        Console {
+            name: name.to_string(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]

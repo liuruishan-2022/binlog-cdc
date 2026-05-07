@@ -14,7 +14,7 @@ pub enum Source {
     #[serde(rename = "mysql")]
     Mysql(Mysql),
     #[serde(rename = "mysqldump")]
-    MysqlDump(MysqlDump),
+    MysqlDump(Mysqldump),
 }
 
 ///
@@ -102,9 +102,19 @@ impl Mysql {
 ///
 /// 这种类型的配置其实很简单，就是读取某个文件夹下面的文件就行了
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct MysqlDump {
+pub struct Mysqldump {
     name: String,
     filepath: String,
+}
+
+impl Mysqldump {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn filepath(&self) -> &str {
+        &self.filepath
+    }
 }
 
 #[cfg(test)]

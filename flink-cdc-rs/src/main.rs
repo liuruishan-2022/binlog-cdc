@@ -13,13 +13,17 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 
-use crate::{args::arguments::Args, config::cdc::FlinkCdc};
+use crate::{
+    args::arguments::Args,
+    config::{CdcConfig, cdc::FlinkCdc, load_config},
+};
 use clap::Parser;
 
 pub mod args;
 pub mod binlog;
 pub mod common;
 pub mod config;
+pub mod pipeline;
 pub mod savepoint;
 pub mod sink;
 pub mod source;
@@ -45,16 +49,21 @@ async fn main() {
     let registry = Arc::new(Mutex::new(Registry::default()));
     let registry_binlog = registry.clone();
 
+    //tokio::spawn(async move {
+    //    let config = FlinkCdc::read_from(&flink_cdc_path);
+    //    let result = binlog::start_dump(registry_binlog, &config).await;
+    //    if result.is_err() {
+    //        warn!("binlog error:{}", result.err().unwrap());
+    //        process::exit(1);
+    //    } else {
+    //        warn!("binlog read retrun,we will exit now!");
+    //        process::exit(0);
+    //    }
+    //});
+
     tokio::spawn(async move {
-        let config = FlinkCdc::read_from(&flink_cdc_path);
-        let result = binlog::start_dump(registry_binlog, &config).await;
-        if result.is_err() {
-            warn!("binlog error:{}", result.err().unwrap());
-            process::exit(1);
-        } else {
-            warn!("binlog read retrun,we will exit now!");
-            process::exit(0);
-        }
+        let config = load_config(&flink_cdc_path);
+        pipeline::pipeline(&config).await;
     });
 
     let registry_metrics = registry.clone();

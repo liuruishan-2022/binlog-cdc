@@ -1,7 +1,8 @@
 use crate::binlog::row::DebeziumFormat;
 
-pub mod kafka_sink;
-pub mod mysql_sink;
+pub mod console;
+pub mod kafka;
+pub mod mysql;
 
 ///
 /// 在Sink侧统一处理批量的DebeziumFormat数据的trait定义

@@ -7,23 +7,24 @@ use rdkafka::{
 use tracing::{info, warn};
 
 use crate::{
-    binlog::row::DebeziumFormat, config::CdcConfig, config::source::Kafka, sink::SinkStream,
+    binlog::row::DebeziumFormat, config::CdcConfig, config::source::Kafka as KafkaConfig,
+    sink::SinkStream,
 };
 
 ///
 /// 放置Kafka作为数据源的处理代码
 ///
 
-pub struct KafkaSource<'a, T>
+pub struct Kafka<'a, T>
 where
     T: SinkStream,
 {
     sink: T,
-    source_config: &'a Kafka,
+    source_config: &'a KafkaConfig,
     cdc_config: &'a CdcConfig,
 }
 
-impl<'a, T> KafkaSource<'a, T>
+impl<'a, T> Kafka<'a, T>
 where
     T: SinkStream,
 {
@@ -37,8 +38,8 @@ where
     const COMPRESSION_TYPE: &'static str = "compression.type";
     const HEARTBEAT_INTERVAL_MS: &'static str = "heartbeat.interval.ms";
     const LINKGER_MS: &'static str = "linger.ms";
-    pub fn new(sink: T, source_config: &'a Kafka, cdc_config: &'a CdcConfig) -> Self {
-        KafkaSource {
+    pub fn new(sink: T, source_config: &'a KafkaConfig, cdc_config: &'a CdcConfig) -> Self {
+        Kafka {
             sink,
             source_config,
             cdc_config,

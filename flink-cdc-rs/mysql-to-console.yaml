@@ -1,0 +1,8 @@
+source:
+  type: mysqldump
+  name: mysqldump_source
+  filepath: /home/liuxu/Documents/press/test
+
+sink:
+  type: console
+  name: Console
