@@ -1,5 +1,27 @@
 # flink-cdc-rs 性能优化计划
 
+## v1.2.0 版本目标 ✅
+
+### 目标内容
+
+- ✅ 实现 `mysqldump -> console` 数据流水线
+- ✅ 支持从 MySQL dump SQL 文件解析数据变更事件
+- ✅ 支持将解析后的 CDC 事件输出到 console，便于本地调试和链路验证
+
+### 流水线架构
+
+```
+MySQL Dump SQL → [mysqldump source] → [pipeline] → [console sink]
+```
+
+### 应用场景
+
+- 本地验证 mysqldump 解析逻辑
+- 在不依赖 Kafka/MySQL sink 的情况下调试 CDC 事件结构
+- 为后续 source/sink 组合式流水线能力打基础
+
+---
+
 ## 阶段1: 内存分配优化 ✅
 
 ### 优化内容

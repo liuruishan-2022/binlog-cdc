@@ -114,17 +114,7 @@ impl<'a> RowEventHandler<'a> {
     }
 
     async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
-        // 根据环境变量 RSKAFKA 决定使用哪个 sink
-        // 如果设置了环境变量 RSKAFKA，则使用 rskafka_sink
-        // 否则使用传统的 kafka_sink (rdkafka)
-        if std::env::var("NOKAFKA").is_ok() {
-            return;
-        }
-        if std::env::var("RSKAFKA").is_ok() {
-            self.rskafka_sink.send_messages(debezium).await;
-        } else {
-            self.kafka_sink.send_batch_messages(debezium).await;
-        }
+        self.kafka_sink.send_batch_messages(debezium).await;
     }
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {
