@@ -15,11 +15,12 @@ impl ConsoleSink {
         ConsoleSink { channels: channels }
     }
 
-    pub fn start(self) -> Vec<tokio::task::JoinHandle<()>> {
+    pub fn start(&self) -> Vec<tokio::task::JoinHandle<()>> {
         self.channels
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(index, receiver)| {
+                let receiver = receiver.clone();
                 tokio::task::spawn_blocking(move || {
                     info!("console sink receiver启动, index={}", index);
                     while let Ok(message) = receiver.recv() {
@@ -33,7 +34,7 @@ impl ConsoleSink {
             .collect::<Vec<_>>()
     }
 
-    pub async fn write(self) {
+    pub async fn write(&self) {
         let handles = self.start();
         for handle in handles {
             handle.await.expect("console sink write task failed");

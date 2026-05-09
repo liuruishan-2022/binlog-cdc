@@ -2,7 +2,9 @@ use crossbeam_channel::{Receiver, Sender};
 use tracing::info;
 
 use crate::{
-    binlog::row::DebeziumFormat, config::CdcConfig, sink::console::ConsoleSink,
+    binlog::row::DebeziumFormat,
+    config::{CdcConfig, sink::Sink},
+    sink::{console::ConsoleSink, kafka::RskafkaSink},
     source::mysqldump::MysqldumpSource,
 };
 
@@ -12,8 +14,15 @@ use crate::{
 
 pub async fn pipeline(cdc: &CdcConfig) {
     let (senders, receivers) = channels();
-    let sink = ConsoleSink::create(receivers);
-    let sink_handles = sink.start();
+    let sink_handles = match cdc.sink() {
+        Sink::Console(_) => ConsoleSink::create(receivers).start(),
+        Sink::Kafka(kafka) => RskafkaSink::create_with_channels(kafka, receivers)
+            .await
+            .start(),
+        Sink::Mysql(_) => {
+            panic!("mysql sink is not supported by pipeline yet");
+        }
+    };
     info!("sink receiver workers已启动, count={}", sink_handles.len());
 
     let mut source = MysqldumpSource::create(cdc, senders);

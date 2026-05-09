@@ -58,6 +58,37 @@ impl Kafka {
             linger_ms: None,
         }
     }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn bootstrap_server(&self) -> &str {
+        self.bootstrap_server.as_str()
+    }
+
+    pub fn bootstrap_servers(&self) -> Vec<String> {
+        self.bootstrap_server
+            .split(',')
+            .map(|server| server.to_string())
+            .collect::<Vec<String>>()
+    }
+
+    pub fn compression_type(&self) -> &str {
+        self.compression_type.as_str()
+    }
+
+    pub fn topic(&self) -> &str {
+        self.topic.as_str()
+    }
+
+    pub fn batch_size(&self) -> u32 {
+        self.batch_size.unwrap_or(10485760)
+    }
+
+    pub fn linger_ms(&self) -> u32 {
+        self.linger_ms.unwrap_or(100)
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]

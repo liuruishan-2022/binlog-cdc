@@ -16,7 +16,7 @@ use tracing::warn;
 use crate::{
     binlog::{Metrics, schema::TableMeta},
     config::cdc::FlinkCdc,
-    sink::kafka::{KafkaSink, RskafkaSink},
+    sink::kafka::KafkaSink,
     transform::parser::ProjectionHandler,
 };
 
@@ -28,17 +28,14 @@ pub struct RowEventHandler<'a> {
     kafka_sink: KafkaSink,
     metrics: &'a Metrics,
     projection: ProjectionHandler,
-    rskafka_sink: RskafkaSink,
 }
 
 impl<'a> RowEventHandler<'a> {
     pub async fn build(config: &'a FlinkCdc, metrics: &'a Metrics) -> Self {
-        let rskafka_sink = RskafkaSink::create(config).await;
         RowEventHandler {
             kafka_sink: KafkaSink::build(config),
             metrics: metrics,
             projection: ProjectionHandler::create(config.transforms()),
-            rskafka_sink: rskafka_sink,
         }
     }
 

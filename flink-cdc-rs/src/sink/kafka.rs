@@ -15,6 +15,7 @@ use rdkafka::{
 use rskafka::{
     client::{
         Client, ClientBuilder,
+        partition::Compression,
         producer::{BatchProducer, BatchProducerBuilder, aggregator::RecordAggregator},
     },
     record::Record,
@@ -22,7 +23,11 @@ use rskafka::{
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{info, warn};
 
-use crate::{binlog::row::DebeziumFormat, config::cdc::FlinkCdc, sink::SinkStream};
+use crate::{
+    binlog::row::DebeziumFormat,
+    config::{cdc::FlinkCdc, sink::Kafka},
+    sink::SinkStream,
+};
 
 ///
 /// 按照Flink CDC的思想，有source和sink的类型，目前我们只支持sink为Kafka的类型
@@ -178,11 +183,11 @@ impl SinkStream for SpmcKafkaSink {
 /// rdkafka存在一定的效率问题，所以还是使用rskafka组件
 ///
 
-type PartitionProducers = HashMap<i32, BatchProducer<RecordAggregator>>;
+type PartitionProducers = HashMap<i32, Arc<BatchProducer<RecordAggregator>>>;
 
 pub struct RskafkaSink {
-    client: Client,
     partition_producers: PartitionProducers,
+    channels: Vec<crossbeam_channel::Receiver<DebeziumFormat>>,
 }
 
 impl RskafkaSink {
@@ -191,15 +196,51 @@ impl RskafkaSink {
             .build()
             .await
             .expect("create rskafka client error...");
-        let producers = RskafkaSink::load_metadata(&client, config.sink_topic(), config).await;
+        let producers = RskafkaSink::load_metadata(
+            &client,
+            config.sink_topic(),
+            config.sink_linger_ms(),
+            config.sink_batch_size(),
+            config.sink_compression_type(),
+        )
+        .await;
 
         RskafkaSink {
-            client: client,
             partition_producers: producers,
+            channels: Vec::new(),
         }
     }
 
-    async fn load_metadata(client: &Client, topic: &str, config: &FlinkCdc) -> PartitionProducers {
+    pub async fn create_with_channels(
+        config: &Kafka,
+        channels: Vec<crossbeam_channel::Receiver<DebeziumFormat>>,
+    ) -> Self {
+        let client = ClientBuilder::new(config.bootstrap_servers())
+            .build()
+            .await
+            .expect("create rskafka client error...");
+        let producers = RskafkaSink::load_metadata(
+            &client,
+            config.topic(),
+            config.linger_ms(),
+            config.batch_size(),
+            config.compression_type(),
+        )
+        .await;
+
+        RskafkaSink {
+            partition_producers: producers,
+            channels: channels,
+        }
+    }
+
+    async fn load_metadata(
+        client: &Client,
+        topic: &str,
+        linger_ms: u32,
+        batch_size: u32,
+        compression_type: &str,
+    ) -> PartitionProducers {
         let topics = client
             .list_topics()
             .await
@@ -222,34 +263,76 @@ impl RskafkaSink {
 
             let partition_client = Arc::new(partition_client);
             let producer = BatchProducerBuilder::new(partition_client)
-                .with_compression(rskafka::client::partition::Compression::Lz4)
-                .with_linger(Duration::from_millis(config.sink_linger_ms() as u64))
-                .build(RecordAggregator::new(10485760));
-            producers.insert(*partition, producer);
+                .with_compression(RskafkaSink::compression(compression_type))
+                .with_linger(Duration::from_millis(linger_ms as u64))
+                .build(RecordAggregator::new(batch_size as usize));
+            producers.insert(*partition, Arc::new(producer));
         }
 
         return producers;
     }
 
-    pub async fn send_messages(&self, messages: Vec<DebeziumFormat>) {
-        // 直接发送所有消息，BatchProducer 会自动批量积累
-        for msg in messages {
-            let mut hasher = DefaultHasher::new();
-            msg.keys().hash(&mut hasher);
-            let hash = hasher.finish();
-            let partition = (hash % self.partition_producers.len() as u64) as i32;
-            let record: Record = msg.into();
+    pub fn start(&self) -> Vec<tokio::task::JoinHandle<()>> {
+        self.channels
+            .iter()
+            .enumerate()
+            .map(|(index, receiver)| {
+                let sink = RskafkaSink {
+                    partition_producers: self.partition_producers.clone(),
+                    channels: Vec::new(),
+                };
+                let receiver = receiver.clone();
+                tokio::spawn(async move {
+                    info!("rskafka sink receiver启动, index={}", index);
+                    while let Ok(message) = receiver.recv() {
+                        sink.send_message(message).await;
+                    }
+                    info!("rskafka sink receiver退出, index={}", index);
+                })
+            })
+            .collect::<Vec<_>>()
+    }
 
-            if let Some(producer) = self.partition_producers.get(&partition) {
-                if let Ok(response) = producer.produce(record).await {
+    pub async fn write(&self) {
+        let handles = self.start();
+        for handle in handles {
+            handle.await.expect("rskafka sink write task failed");
+        }
+    }
+
+    async fn send_message(&self, message: DebeziumFormat) {
+        if self.partition_producers.is_empty() {
+            warn!("rskafka sink has no partition producer");
+            return;
+        }
+
+        let key = message.keys();
+        let partition = self.partition(&key);
+        let record: Record = message.into();
+
+        if let Some(producer) = self.partition_producers.get(&partition) {
+            match producer.produce(record).await {
+                Ok(offset) => {
                     info!(
                         "send message to kafka success offset:{} partition:{}",
-                        response, partition
+                        offset, partition
                     );
-                } else {
-                    warn!("Failed to produce message to kafka");
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to produce message to kafka partition:{}, error:{:?}",
+                        partition, err
+                    );
                 }
             }
+        } else {
+            warn!("partition producer not found, partition:{}", partition);
+        }
+    }
+
+    pub async fn send_messages(&self, messages: Vec<DebeziumFormat>) {
+        for msg in messages {
+            self.send_message(msg).await;
         }
     }
 
@@ -257,6 +340,21 @@ impl RskafkaSink {
         let mut hasher = DefaultHasher::new();
         source.hash(&mut hasher);
         hasher.finish()
+    }
+
+    fn partition(&self, key: &str) -> i32 {
+        let hash = RskafkaSink::hash_code(key);
+        (hash % self.partition_producers.len() as u64) as i32
+    }
+
+    fn compression(compression_type: &str) -> Compression {
+        match compression_type.to_ascii_lowercase().as_str() {
+            "gzip" => Compression::Gzip,
+            "lz4" => Compression::Lz4,
+            "snappy" => Compression::Snappy,
+            "zstd" => Compression::Zstd,
+            _ => Compression::NoCompression,
+        }
     }
 }
 
