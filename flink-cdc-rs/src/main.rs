@@ -1,4 +1,4 @@
-use std::{process, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Router,
@@ -10,12 +10,12 @@ use axum::{
 };
 use prometheus_client::{encoding::text::encode, registry::Registry};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 
 use crate::{
     args::arguments::Args,
-    config::{CdcConfig, cdc::FlinkCdc, load_config},
+    config::load_config,
 };
 use clap::Parser;
 
@@ -47,7 +47,7 @@ async fn main() {
     let flink_cdc_path = args.flink_cdc().to_string();
 
     let registry = Arc::new(Mutex::new(Registry::default()));
-    let registry_binlog = registry.clone();
+    let _registry_binlog = registry.clone();
 
     //tokio::spawn(async move {
     //    let config = FlinkCdc::read_from(&flink_cdc_path);
