@@ -25,6 +25,10 @@ use crate::{
         CdcConfig,
         source::{Mysqldump, Source},
     },
+    pipeline::{
+        message::{PipelineRecord, RouteResolver, SourceMeta},
+        resolve_record,
+    },
 };
 
 ///
@@ -32,7 +36,8 @@ use crate::{
 ///
 pub struct MysqldumpSource<'a> {
     config: &'a CdcConfig,
-    channels: Vec<crossbeam_channel::Sender<DebeziumFormat>>,
+    channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    resolver: RouteResolver,
     table_cache: HashMap<String, Table>,
 }
 
@@ -41,11 +46,13 @@ type SqlLine = Vec<u8>;
 impl<'a> MysqldumpSource<'a> {
     pub fn create(
         cdc: &'a CdcConfig,
-        channels: Vec<crossbeam_channel::Sender<DebeziumFormat>>,
+        channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+        resolver: RouteResolver,
     ) -> Self {
         Self {
             config: cdc,
             channels,
+            resolver,
             table_cache: HashMap::new(),
         }
     }
@@ -303,10 +310,13 @@ impl<'a> MysqldumpSource<'a> {
     }
 
     fn send_debezium(&self, debezium: DebeziumFormat) {
+        let meta = SourceMeta::mysqldump(debezium.source_table().unwrap_or_default());
+        let key = debezium.keys();
+        let record = resolve_record(PipelineRecord::new(debezium, meta), &self.resolver);
         let mut hasher = DefaultHasher::new();
-        debezium.keys().hash(&mut hasher);
+        key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
-        if let Err(err) = self.channels[index].send(debezium) {
+        if let Err(err) = self.channels[index].send(record) {
             warn!("发送mysqldump debezium数据到channel失败:{:?}", err);
         }
     }

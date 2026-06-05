@@ -71,6 +71,49 @@ pub struct Mysql {
 }
 
 impl Mysql {
+    pub fn url(&self) -> String {
+        let uri = format!("mysql://{}:{}", self.hostname, self.port);
+        let mut uri = url::Url::parse(&uri).unwrap();
+        let _ = uri.set_username(self.username());
+        let _ = uri.set_password(Some(self.password()));
+        uri.as_str().to_string()
+    }
+
+    pub fn username(&self) -> &str {
+        self.username.as_str()
+    }
+
+    pub fn password(&self) -> &str {
+        self.password.as_str()
+    }
+
+    pub fn tables(&self) -> &str {
+        self.tables.as_str()
+    }
+
+    pub fn server_id(&self) -> u64 {
+        self.server_id
+            .split_once('-')
+            .map(|(prefix, _)| prefix.parse::<u64>())
+            .unwrap_or_else(|| self.server_id.parse())
+            .expect(format!("parse server-id:{} error", self.server_id.as_str()).as_str())
+    }
+
+    pub fn binlog_filename(&self) -> String {
+        self.binlog_filename
+            .clone()
+            .expect("error of fetch scan.startup.specific-offset.file")
+    }
+
+    pub fn binlog_offset(&self) -> u32 {
+        self.binlog_offset
+            .expect("error of fetch scan.startup.specific-offset.pos")
+    }
+
+    pub fn connect_timeout(&self) -> Duration {
+        self.connect_timeout.unwrap_or(Duration::from_secs(30))
+    }
+
     pub fn new(
         name: &str,
         hostname: &str,

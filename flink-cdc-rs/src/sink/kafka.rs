@@ -26,6 +26,7 @@ use tracing::{info, warn};
 use crate::{
     binlog::row::DebeziumFormat,
     config::{cdc::FlinkCdc, sink::Kafka},
+    pipeline::message::{PipelineRecord, SinkTarget},
     sink::SinkStream,
 };
 
@@ -187,7 +188,8 @@ type PartitionProducers = HashMap<i32, Arc<BatchProducer<RecordAggregator>>>;
 
 pub struct RskafkaSink {
     partition_producers: PartitionProducers,
-    channels: Vec<crossbeam_channel::Receiver<DebeziumFormat>>,
+    topic: String,
+    channels: Vec<crossbeam_channel::Receiver<PipelineRecord>>,
 }
 
 impl RskafkaSink {
@@ -207,13 +209,14 @@ impl RskafkaSink {
 
         RskafkaSink {
             partition_producers: producers,
+            topic: config.sink_topic().to_string(),
             channels: Vec::new(),
         }
     }
 
     pub async fn create_with_channels(
         config: &Kafka,
-        channels: Vec<crossbeam_channel::Receiver<DebeziumFormat>>,
+        channels: Vec<crossbeam_channel::Receiver<PipelineRecord>>,
     ) -> Self {
         let client = ClientBuilder::new(config.bootstrap_servers())
             .build()
@@ -230,6 +233,7 @@ impl RskafkaSink {
 
         RskafkaSink {
             partition_producers: producers,
+            topic: config.topic().to_string(),
             channels: channels,
         }
     }
@@ -279,13 +283,15 @@ impl RskafkaSink {
             .map(|(index, receiver)| {
                 let sink = RskafkaSink {
                     partition_producers: self.partition_producers.clone(),
+                    topic: self.topic.clone(),
                     channels: Vec::new(),
                 };
                 let receiver = receiver.clone();
-                tokio::spawn(async move {
+                tokio::task::spawn_blocking(move || {
                     info!("rskafka sink receiver启动, index={}", index);
+                    let handle = tokio::runtime::Handle::current();
                     while let Ok(message) = receiver.recv() {
-                        sink.send_message(message).await;
+                        handle.block_on(sink.send_message(message));
                     }
                     info!("rskafka sink receiver退出, index={}", index);
                 })
@@ -300,15 +306,24 @@ impl RskafkaSink {
         }
     }
 
-    async fn send_message(&self, message: DebeziumFormat) {
+    async fn send_message(&self, message: PipelineRecord) {
         if self.partition_producers.is_empty() {
             warn!("rskafka sink has no partition producer");
             return;
         }
 
+        if let Some(SinkTarget::KafkaTopic(topic)) = message.target() {
+            if topic != &self.topic {
+                warn!(
+                    "route target kafka topic:{} differs from initialized topic:{}, using initialized topic",
+                    topic, self.topic
+                );
+            }
+        }
+
         let key = message.keys();
         let partition = self.partition(&key);
-        let record: Record = message.into();
+        let record: Record = message.into_event().into();
 
         if let Some(producer) = self.partition_producers.get(&partition) {
             match producer.produce(record).await {
@@ -330,7 +345,7 @@ impl RskafkaSink {
         }
     }
 
-    pub async fn send_messages(&self, messages: Vec<DebeziumFormat>) {
+    pub async fn send_records(&self, messages: Vec<PipelineRecord>) {
         for msg in messages {
             self.send_message(msg).await;
         }
@@ -373,8 +388,4 @@ impl From<DebeziumFormat> for Record {
     }
 }
 
-impl SinkStream for RskafkaSink {
-    async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
-        self.send_messages(messages).await;
-    }
-}
+impl SinkStream for RskafkaSink {}
