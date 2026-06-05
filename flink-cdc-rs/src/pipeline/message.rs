@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::Display};
+use std::fmt::{Display, write};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,12 @@ pub enum PipelineRecord {
     MysqlBinlogFile(MysqlBinlogFile),
 }
 
+impl Display for PipelineRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "pipeline record:{}", self)
+    }
+}
+
 ///
 /// 定义Kafak的消息结构,但是我们可能定义多种数据结构，因为不清楚从Kafka消费到什么类型的消息
 ///
@@ -25,6 +31,12 @@ pub struct KafkaDebezium {
     topic: String,
 }
 
+impl Display for KafkaDebezium {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "data:{} topic:{}", self.data, self.topic)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct MysqlBinlogFile {
     data: DebeziumFormat,
@@ -32,6 +44,16 @@ pub struct MysqlBinlogFile {
     table: String,
     table_id: String,
     database: String,
+}
+
+impl Display for MysqlBinlogFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "data:{} file:{} table:{} table_id:{} database:{}",
+            self.data, self.file, self.table, self.table_id, self.database
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize)]
