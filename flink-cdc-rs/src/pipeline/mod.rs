@@ -1,44 +1,31 @@
-use crossbeam_channel::{Receiver, Sender};
-use tracing::info;
-
-use crate::{
-    binlog::row::DebeziumFormat,
-    config::{CdcConfig, sink::Sink},
-    sink::{console::ConsoleSink, kafka::RskafkaSink},
-    source::mysqldump::MysqldumpSource,
-};
+use crate::config::CdcConfig;
+use crate::pipeline::message::PipelineRecord;
+use crossbeam_channel::Receiver;
+use crossbeam_channel::Sender;
 
 /// 主要是放置数据处理的Pipeline的逻辑
 /// 类似于流水线的思想去做
 ///
+/// 我们的想法如下:
+/// 1. 整体的逻辑是source--->channel---->transformer(待定去做)--->sink
+/// 2. source投递的数据为:数据本身+源数据
+/// 3. 源数据是多种类型的enum,包含各种自定义的数据信息
+///
+pub mod message;
 
-pub async fn pipeline(cdc: &CdcConfig) {
-    let (senders, receivers) = channels();
-    let sink_handles = match cdc.sink() {
-        Sink::Console(_) => ConsoleSink::create(receivers).start(),
-        Sink::Kafka(kafka) => RskafkaSink::create_with_channels(kafka, receivers)
-            .await
-            .start(),
-        Sink::Mysql(_) => {
-            panic!("mysql sink is not supported by pipeline yet");
-        }
-    };
-    info!("sink receiver workers已启动, count={}", sink_handles.len());
+pub async fn pipeline(cdc: &CdcConfig) {}
 
-    let mut source = MysqldumpSource::create(cdc, senders);
-    info!("source开始读取");
-    source.read().await;
-    info!("source读取完成, 准备关闭sender");
-    drop(source);
+fn channels(cdc: &CdcConfig) -> (Vec<Sender<PipelineRecord>>, Vec<Receiver<PipelineRecord>>) {
+    let parallelism = cdc
+        .pipeline()
+        .map(|pipeline| pipeline.parallelism())
+        .unwrap_or(6);
+    let capacity = cdc
+        .pipeline()
+        .map(|pipeline| pipeline.capacity())
+        .unwrap_or(1000);
 
-    for handle in sink_handles {
-        handle.await.expect("sink task failed");
-    }
-    info!("pipeline执行完成");
-}
-
-fn channels() -> (Vec<Sender<DebeziumFormat>>, Vec<Receiver<DebeziumFormat>>) {
-    (1..=6)
-        .map(|_index| crossbeam_channel::bounded(1000))
+    (1..=parallelism)
+        .map(|_index| crossbeam_channel::bounded(capacity as usize))
         .unzip()
 }

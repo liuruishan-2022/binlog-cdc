@@ -1,17 +1,18 @@
+use prometheus_client::metrics::info;
 use tracing::info;
 
-use crate::binlog::row::DebeziumFormat;
+use crate::pipeline::message::PipelineRecord;
 
 ///
 /// 提供一个朝向控制台输出的Sink实现, 主要用于测试和调试
 ///
 
 pub struct ConsoleSink {
-    channels: Vec<crossbeam_channel::Receiver<DebeziumFormat>>,
+    channels: Vec<crossbeam_channel::Receiver<PipelineRecord>>,
 }
 
 impl ConsoleSink {
-    pub fn create(channels: Vec<crossbeam_channel::Receiver<DebeziumFormat>>) -> Self {
+    pub fn create(channels: Vec<crossbeam_channel::Receiver<PipelineRecord>>) -> Self {
         ConsoleSink { channels: channels }
     }
 
@@ -24,10 +25,7 @@ impl ConsoleSink {
                 tokio::task::spawn_blocking(move || {
                     info!("console sink receiver启动, index={}", index);
                     while let Ok(message) = receiver.recv() {
-                        info!(
-                            "console sink receiver收到消息: message={}",
-                            message.to_json()
-                        );
+                        info!("data:{}", message);
                     }
                 })
             })

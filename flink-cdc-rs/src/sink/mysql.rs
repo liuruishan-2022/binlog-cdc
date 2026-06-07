@@ -6,6 +6,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::binlog::row::DebeziumFormat;
+use crate::pipeline::message::{PipelineRecord, SinkTarget};
 use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
 
 ///
@@ -123,6 +124,20 @@ impl MysqlSink {
             where_sql
         );
         info!("执行mysql的更新操作:{}", sql);
+    }
+
+    pub async fn process_record(&self, record: &PipelineRecord) {
+        let table = match record.target().and_then(SinkTarget::mysql_table) {
+            Some(table) => table,
+            None => {
+                warn!(
+                    "mysql sink record has no mysql table target: {:?}",
+                    record.target()
+                );
+                return;
+            }
+        };
+        self.process(record.event(), &table).await;
     }
 
     async fn desc_table(&self, table: &str) -> TableMeta {

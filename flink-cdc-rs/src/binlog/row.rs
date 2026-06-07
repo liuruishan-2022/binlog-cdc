@@ -1,7 +1,9 @@
+use std::fmt::Display;
+
 use base64::{Engine, engine::general_purpose};
 use chrono::{Local, TimeZone, offset::LocalResult};
 use mysql_binlog_connector_rust::{
-    column::column_value::ColumnValue,
+    column::{column_value::ColumnValue, json},
     event::{
         delete_rows_event::DeleteRowsEvent, row_event::RowEvent,
         update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
@@ -299,6 +301,36 @@ impl DebeziumFormat {
             return after.get(column_name);
         }
         return None;
+    }
+
+    pub fn source_database(&self) -> Option<&str> {
+        if self.source.db.is_empty() {
+            None
+        } else {
+            Some(self.source.db.as_str())
+        }
+    }
+
+    pub fn source_table(&self) -> Option<&str> {
+        if self.source.table.is_empty() {
+            None
+        } else {
+            Some(self.source.table.as_str())
+        }
+    }
+}
+
+impl Display for DebeziumFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "before:{} after:{} op:{} source:{} key:{}",
+            json!(self.before),
+            json!(self.after),
+            self.op(),
+            json!(self.source),
+            json!(self.key)
+        )
     }
 }
 
