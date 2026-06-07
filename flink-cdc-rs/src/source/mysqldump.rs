@@ -63,15 +63,17 @@ impl<'a> MysqldumpSource<'a> {
             match path.extension().and_then(|ext| ext.to_str()) {
                 Some("zip") => {
                     if let Err(err) = self.read_zip_file(&path) {
-                        warn!(error = %err, "读取zip文件:{} 失败", path.display());
+                        warn!(error = %err, "read zip file:{} failed!", path.display());
                     }
                 }
                 Some("sql") => {
                     if let Err(err) = self.read_sql_file(&path) {
-                        warn!(error = %err, "读取sql文件:{} 失败", path.display());
+                        warn!(error = %err, "read sql file:{} failed!", path.display());
                     }
                 }
-                _ => {}
+                _ => {
+                    warn!("unknown file:{} type!", path.display());
+                }
             }
         }
     }
@@ -104,17 +106,18 @@ impl<'a> MysqldumpSource<'a> {
     }
 
     fn read_sql_file(&mut self, path: &Path) -> Result<(), String> {
-        info!("开始处理sql文件:{}", path.display());
-        let file = File::open(path).map_err(|err| format!("打开sql文件失败:{err}"))?;
+        info!("start read sql file:{}", path.display());
+        let file = File::open(path).map_err(|err| format!("open sql file failed:{err}"))?;
         let reader = BufReader::new(file);
         self.process_sql_file(reader);
         Ok(())
     }
 
     fn read_zip_file(&mut self, path: &Path) -> Result<(), String> {
-        info!("开始处理压缩文件:{}", path.display());
-        let file = File::open(path).map_err(|err| format!("打开zip文件失败:{err}"))?;
-        let mut reader = ZipArchive::new(file).map_err(|err| format!("解析zip文件失败:{err}"))?;
+        info!("start read zip file:{}", path.display());
+        let file = File::open(path).map_err(|err| format!("open zip file failed:{err}"))?;
+        let mut reader =
+            ZipArchive::new(file).map_err(|err| format!("process zip file failed:{err}"))?;
 
         let filenames = reader
             .file_names()
@@ -124,14 +127,14 @@ impl<'a> MysqldumpSource<'a> {
         for filename in filenames {
             let path = Path::new(&filename);
             if path.is_dir() {
-                info!("跳过目录:{}", filename);
+                info!("skip dir:{}", filename);
                 continue;
             }
 
-            info!("开始处理zip文件内的sql文件:{}", filename);
+            info!("start read  sql file:{} in zip!", filename);
             let mut file_reader = reader
                 .by_name(filename.as_str())
-                .map_err(|err| format!("解压zip压缩文件失败:{err}"))?;
+                .map_err(|err| format!("unzip zip file failed:{err}"))?;
             let reader = BufReader::new(&mut file_reader);
             self.process_sql_file(reader);
         }
@@ -151,7 +154,7 @@ impl<'a> MysqldumpSource<'a> {
 
         while reader.read_until(b'\n', &mut line_bytes).unwrap_or(0) > 0 {
             if line_bytes.len() <= 2 {
-                debug!("空行,丢弃");
+                debug!("empty line, discard");
                 line_bytes.clear();
                 continue;
             }
@@ -159,7 +162,7 @@ impl<'a> MysqldumpSource<'a> {
             if (line_bytes[0] == b'/' && line_bytes[1] == b'*')
                 || (line_bytes[0] == b'-' && line_bytes[1] == b'-')
             {
-                debug!("注释的行,丢弃:{}", String::from_utf8_lossy(&line_bytes));
+                debug!("comment line, discard:{}", String::from_utf8_lossy(&line_bytes));
                 line_bytes.clear();
                 continue;
             }
@@ -168,7 +171,7 @@ impl<'a> MysqldumpSource<'a> {
 
             if sql_line.ends_with(&[b';', b'\n']) || sql_line.ends_with(&[b';']) {
                 debug!(
-                    "查找到真实的SQL语句:{}",
+                    "found actual SQL statement:{}",
                     String::from_utf8_lossy(&sql_line[0..sql_line.len().min(10)])
                 );
                 sql_buffer.push(sql_line);
@@ -209,7 +212,7 @@ impl<'a> MysqldumpSource<'a> {
                 if let Statement::CreateTable(event) = statement {
                     self.parse_create_table(&event);
                 } else {
-                    warn!("判断错误,不是Create Table语句");
+                    warn!("unexpected statement, not a Create Table statement");
                 }
             });
         }
@@ -218,7 +221,7 @@ impl<'a> MysqldumpSource<'a> {
             let insert_count = sql_lines.len();
             let total_bytes = sql_lines.iter().map(|line| line.len()).sum::<usize>();
             info!(
-                "开始并行解析insert语句, count={}, total_size={} bytes",
+                "start parsing insert statements in parallel, count={}, total_size={} bytes",
                 insert_count, total_bytes
             );
 
@@ -227,27 +230,27 @@ impl<'a> MysqldumpSource<'a> {
                 .filter_map(|line| self.parse_insert(line))
                 .for_each(|debeziums| {
                     let rows = debeziums.len();
-                    info!("开始发送Debezium批次到channel, rows={}", rows);
+                    info!("start sending Debezium batch to channel, rows={}", rows);
 
                     debeziums
                         .into_iter()
                         .enumerate()
                         .for_each(|(index, debezium)| {
                             if index == 0 {
-                                info!("准备发送Debezium批次第一条消息到channel");
+                                info!("sending first message of Debezium batch to channel");
                             }
                             self.send_debezium(debezium);
                             let sent = index + 1;
                             if sent % 1000 == 0 || sent == rows {
-                                info!("Debezium批次发送进度, sent={}, rows={}", sent, rows);
+                                info!("Debezium batch send progress, sent={}, rows={}", sent, rows);
                             }
                         });
 
-                    info!("Debezium批次发送完成, rows={}", rows);
+                    info!("Debezium batch sent, rows={}", rows);
                 });
 
             info!(
-                "insert语句解析和发送完成, count={}, total_size={} bytes",
+                "insert statements parsed and sent, count={}, total_size={} bytes",
                 insert_count, total_bytes
             );
         }
@@ -257,12 +260,12 @@ impl<'a> MysqldumpSource<'a> {
         let name = &event.name.0.get(0).expect("Create Table语句缺少表名");
         match name {
             ObjectNamePart::Identifier(ident) => {
-                info!("表名:{}", ident.value);
+                info!("table name:{}", ident.value);
                 let columns = self.parse_columns(event);
                 let table = Table::new(ident.value.clone(), columns);
                 self.table_cache.insert(ident.value.clone(), table);
             }
-            _ => warn!("忽略不支持的Create Table表名格式"),
+            _ => warn!("ignore unsupported Create Table name format"),
         }
     }
 
@@ -278,10 +281,10 @@ impl<'a> MysqldumpSource<'a> {
     }
 
     fn parse_insert(&self, sql: Vec<u8>) -> Option<Vec<DebeziumFormat>> {
-        info!("开始解析insert语句, size={} bytes", sql.len());
+        info!("start parsing insert statement, size={} bytes", sql.len());
         let insert = parse_insert_sql(&sql).expect("解析Insert into语句失败");
         info!(
-            "insert语句解析完成, table={}, rows={}",
+            "insert statement parsed, table={}, rows={}",
             insert.table_name(),
             insert.rows.len()
         );
@@ -289,20 +292,20 @@ impl<'a> MysqldumpSource<'a> {
         if let Some(table) = self.table_cache.get(insert.table_name()) {
             let values = insert.row_values();
             info!(
-                "开始构建Debezium数据, table={}, rows={}",
+                "start building Debezium data, table={}, rows={}",
                 table.name(),
                 values.len()
             );
             let debezium = table.build_debezium(values);
             info!(
-                "Debezium数据构建完成, table={}, rows={}",
+                "Debezium data built, table={}, rows={}",
                 table.name(),
                 debezium.len()
             );
             Some(debezium)
         } else {
             warn!(
-                "表存在在sql dump的文件中,无法获取对应的字段:{}!",
+                "table exists in sql dump file, but corresponding fields cannot be found:{}!",
                 insert.table_name()
             );
             None
@@ -317,7 +320,7 @@ impl<'a> MysqldumpSource<'a> {
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
         if let Err(err) = self.channels[index].send(record) {
-            warn!("发送mysqldump debezium数据到channel失败:{:?}", err);
+            warn!("failed to send mysqldump Debezium data to channel:{:?}", err);
         }
     }
 }
