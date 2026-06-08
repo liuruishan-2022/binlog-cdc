@@ -13,7 +13,7 @@ use crossbeam_channel::Sender;
 ///
 pub mod message;
 
-pub async fn pipeline(cdc: &CdcConfig) {}
+pub async fn pipeline(_cdc: &CdcConfig) {}
 
 fn channels(cdc: &CdcConfig) -> (Vec<Sender<PipelineRecord>>, Vec<Receiver<PipelineRecord>>) {
     let parallelism = cdc

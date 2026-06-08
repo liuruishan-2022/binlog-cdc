@@ -6,7 +6,6 @@ use tracing::info;
 use tracing::warn;
 
 use crate::binlog::row::DebeziumFormat;
-use crate::pipeline::message::KafkaDebezium;
 use crate::pipeline::message::PipelineRecord;
 use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
 
@@ -130,7 +129,7 @@ impl MysqlSink {
     pub async fn process_record(&self, record: &PipelineRecord) {
         match record {
             PipelineRecord::KafkaDebezium(data) => {
-                let table = data.data().source_table().unwrap_or_default();
+                let _table = data.data().source_table().unwrap_or_default();
                 let topic = data.topic();
                 self.process(data.data(), topic).await;
             }
