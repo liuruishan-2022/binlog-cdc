@@ -16,6 +16,17 @@ pub enum PipelineRecord {
     MysqlBinlogFile(MysqlBinlogFile),
 }
 
+impl PipelineRecord {
+    pub fn create_mysqldump(data: DebeziumFormat, file: String, table: String) -> Self {
+        let dump = Mysqldump::new(data, file, table);
+        return PipelineRecord::Mysqldump(dump);
+    }
+
+    pub fn create_mysql_binlog_stream(data: DebeziumFormat) -> Self {
+        return PipelineRecord::MysqlBinlogStream(data);
+    }
+}
+
 impl Display for PipelineRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "pipeline record:{}", self)

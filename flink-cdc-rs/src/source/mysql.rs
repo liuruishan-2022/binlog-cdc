@@ -25,13 +25,13 @@ use crate::{
         CdcConfig,
         source::{Mysql, Source},
     },
+    pipeline::message::PipelineRecord,
     savepoint::{SavePoints, local::LocalFileSystem},
 };
 
 pub struct MysqlSource<'a> {
     source: &'a Mysql,
     channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-    resolver: RouteResolver,
     current_binlog: String,
     table_schema: TableSchema,
     table_meta_cache: HashMap<String, HashMap<u64, TableMeta>>,
@@ -41,7 +41,6 @@ impl<'a> MysqlSource<'a> {
     pub async fn create(
         cdc: &'a CdcConfig,
         channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-        resolver: RouteResolver,
     ) -> Self {
         let source = match cdc.source() {
             Source::Mysql(source) => source,
@@ -54,7 +53,6 @@ impl<'a> MysqlSource<'a> {
         Self {
             source,
             channels,
-            resolver,
             current_binlog: String::new(),
             table_schema,
             table_meta_cache: HashMap::new(),
@@ -197,11 +195,7 @@ impl<'a> MysqlSource<'a> {
         }
 
         let key = debezium.keys();
-        let meta = SourceMeta::mysql(
-            debezium.source_database().unwrap_or_default(),
-            debezium.source_table().unwrap_or_default(),
-        );
-        let record = resolve_record(PipelineRecord::new(debezium, meta), &self.resolver);
+        let record = PipelineRecord::MysqlBinlogStream(debezium);
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();

@@ -25,10 +25,7 @@ use crate::{
         CdcConfig,
         source::{Mysqldump, Source},
     },
-    pipeline::{
-        message::{PipelineRecord, RouteResolver, SourceMeta},
-        resolve_record,
-    },
+    pipeline::message::PipelineRecord,
 };
 
 ///
@@ -37,7 +34,6 @@ use crate::{
 pub struct MysqldumpSource<'a> {
     config: &'a CdcConfig,
     channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-    resolver: RouteResolver,
     table_cache: HashMap<String, Table>,
 }
 
@@ -47,12 +43,10 @@ impl<'a> MysqldumpSource<'a> {
     pub fn create(
         cdc: &'a CdcConfig,
         channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-        resolver: RouteResolver,
     ) -> Self {
         Self {
             config: cdc,
             channels,
-            resolver,
             table_cache: HashMap::new(),
         }
     }
@@ -317,12 +311,8 @@ impl<'a> MysqldumpSource<'a> {
 
     fn send_debezium(&self, debezium: DebeziumFormat) {
         let key = debezium.keys();
-        let data = Mysqldump::new(
-            debezium,
-            String::from(""),
-            debezium.source_table().unwrap_or_default().to_string(),
-        );
-        let record = PipelineRecord::Mysqldump(data);
+        let table = debezium.source_table().unwrap_or_default().to_string();
+        let record = PipelineRecord::create_mysqldump(debezium, String::from(""), table);
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
