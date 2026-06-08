@@ -194,6 +194,8 @@ impl SinkStream for MysqlSink {
             }
         }
     }
+
+    async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
 }
 
 ///

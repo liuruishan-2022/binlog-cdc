@@ -96,6 +96,8 @@ impl SinkStream for KafkaSink {
     async fn handle_messages(&self, messages: Vec<DebeziumFormat>) {
         self.send_batch_messages(messages).await;
     }
+
+    async fn process(&self, _debezium: &DebeziumFormat, _topic: &str) {}
 }
 
 ///
@@ -176,6 +178,8 @@ impl SinkStream for SpmcKafkaSink {
             }
         }
     }
+
+    async fn process(&self, _debezium: &DebeziumFormat, _topic: &str) {}
 }
 
 ///
@@ -368,4 +372,8 @@ impl RskafkaSink {
     }
 }
 
-impl SinkStream for RskafkaSink {}
+impl SinkStream for RskafkaSink {
+    async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
+
+    async fn process(&self, _debezium: &DebeziumFormat, _topic: &str) {}
+}
