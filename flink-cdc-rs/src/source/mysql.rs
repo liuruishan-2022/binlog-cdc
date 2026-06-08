@@ -29,7 +29,9 @@ use crate::{
     savepoint::{SavePoints, local::LocalFileSystem},
 };
 
-pub struct MysqlSource<'a> {
+pub type MysqlSource<'a> = MysqlDebezium<'a>;
+
+pub struct MysqlDebezium<'a> {
     source: &'a Mysql,
     channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
     current_binlog: String,
@@ -37,7 +39,7 @@ pub struct MysqlSource<'a> {
     table_meta_cache: HashMap<String, HashMap<u64, TableMeta>>,
 }
 
-impl<'a> MysqlSource<'a> {
+impl<'a> MysqlDebezium<'a> {
     pub async fn create(
         cdc: &'a CdcConfig,
         channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
@@ -195,7 +197,7 @@ impl<'a> MysqlSource<'a> {
         }
 
         let key = debezium.keys();
-        let record = PipelineRecord::MysqlBinlogStream(debezium);
+        let record = PipelineRecord::MysqlDebezium(debezium);
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
@@ -203,6 +205,231 @@ impl<'a> MysqlSource<'a> {
         if let Err(err) = self.channels[index].send(record) {
             warn!("send mysql debezium to channel error:{:?}", err);
         }
+    }
+
+    fn can_exclude(&self, database_name: &str, table_name: &str) -> bool {
+        let tables = self.source.tables();
+        if tables == "*" || tables == "*.*" {
+            return false;
+        }
+
+        tables.split(',').all(|pattern| {
+            let pattern = pattern.trim();
+            if let Some((db, table)) = pattern.split_once('.') {
+                let db_match = db == "*" || db == database_name;
+                let table_match = table == "*" || table == table_name;
+                !(db_match && table_match)
+            } else {
+                pattern != table_name
+            }
+        })
+    }
+}
+
+pub struct MysqlBinlogEvent<'a> {
+    source: &'a Mysql,
+    channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    current_binlog: String,
+    table_schema: TableSchema,
+    table_meta_cache: HashMap<String, HashMap<u64, TableMeta>>,
+}
+
+impl<'a> MysqlBinlogEvent<'a> {
+    pub async fn create(
+        cdc: &'a CdcConfig,
+        channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    ) -> Self {
+        let source = match cdc.source() {
+            Source::Mysql(source) => source,
+            _ => panic!("mysql source need mysql config"),
+        };
+        let table_schema = TableSchema::new(&source.url())
+            .await
+            .expect("create mysql table schema error");
+
+        Self {
+            source,
+            channels,
+            current_binlog: String::new(),
+            table_schema,
+            table_meta_cache: HashMap::new(),
+        }
+    }
+
+    pub async fn read(&mut self) {
+        let savepoint = LocalFileSystem::default();
+        let binlog_file = savepoint
+            .load()
+            .unwrap_or_else(|| self.source.binlog_filename());
+        let mut stream = self.binlog_stream(binlog_file).await;
+
+        loop {
+            match stream.read().await {
+                Ok((header, data)) => {
+                    info!("read mysql binlog event timestamp:{}", header.timestamp);
+                    match data {
+                        EventData::Rotate(event) => {
+                            info!("read new binlog:{}", event.binlog_filename);
+                            self.current_binlog = event.binlog_filename.clone();
+                            savepoint.save(&event.binlog_filename);
+                        }
+                        EventData::TableMap(event) => {
+                            self.record_table_meta(event).await;
+                        }
+                        EventData::WriteRows(event) => {
+                            self.send_write_rows(event);
+                        }
+                        EventData::UpdateRows(event) => {
+                            self.send_update_rows(event);
+                        }
+                        EventData::DeleteRows(event) => {
+                            self.send_delete_rows(event);
+                        }
+                        _ => {}
+                    }
+                }
+                Err(BinlogError::IoError(err)) => {
+                    warn!("read binlog io error:{:?}", err);
+                    break;
+                }
+                Err(BinlogError::UnexpectedData(err)) => {
+                    warn!("read binlog unexpected error:{}", err);
+                    break;
+                }
+                Err(err) => {
+                    warn!("read mysql binlog error:{:?}", err);
+                    break;
+                }
+            }
+        }
+    }
+
+    async fn binlog_stream(
+        &self,
+        binlog_file: String,
+    ) -> mysql_binlog_connector_rust::binlog_stream::BinlogStream {
+        let mut client = BinlogClient {
+            url: self.source.url(),
+            server_id: self.source.server_id(),
+            binlog_filename: binlog_file,
+            binlog_position: self.source.binlog_offset(),
+            gtid_enabled: false,
+            gtid_set: String::new(),
+            heartbeat_interval_secs: 10,
+            timeout_secs: self.source.connect_timeout().as_secs(),
+            keepalive_idle_secs: 60,
+            keepalive_interval_secs: 60,
+        };
+
+        client
+            .connect()
+            .await
+            .expect("connect to mysql read binlog file error")
+    }
+
+    async fn record_table_meta(&mut self, event: TableMapEvent) {
+        if self.can_exclude(&event.database_name, &event.table_name) {
+            return;
+        }
+
+        let cache = self
+            .table_meta_cache
+            .entry(self.current_binlog.clone())
+            .or_default();
+        if cache.contains_key(&event.table_id) {
+            return;
+        }
+
+        info!("cache binlog table meta information:{}", event.table_id);
+        if let Some(meta) = self
+            .table_schema
+            .desc_table(event.table_id, &event.database_name, &event.table_name)
+            .await
+        {
+            cache.insert(event.table_id, meta);
+        } else {
+            warn!(
+                "failed to get table meta for {}.{}",
+                event.database_name, event.table_name
+            );
+        }
+    }
+
+    fn send_write_rows(&self, event: WriteRowsEvent) {
+        if let Some(table_meta) = self.table_meta(event.table_id) {
+            for row in event.rows {
+                let key = Self::row_partition_key(table_meta, &row);
+                let event = WriteRowsEvent {
+                    table_id: table_meta.table_id(),
+                    included_columns: Vec::new(),
+                    rows: vec![row],
+                };
+                self.send_binlog_event(key, EventData::WriteRows(event));
+            }
+        }
+    }
+
+    fn send_update_rows(&self, event: UpdateRowsEvent) {
+        if let Some(table_meta) = self.table_meta(event.table_id) {
+            for (before, after) in event.rows {
+                let key = Self::row_partition_key(table_meta, &before);
+                let event = UpdateRowsEvent {
+                    table_id: table_meta.table_id(),
+                    included_columns_before: Vec::new(),
+                    included_columns_after: Vec::new(),
+                    rows: vec![(before, after)],
+                };
+                self.send_binlog_event(key, EventData::UpdateRows(event));
+            }
+        }
+    }
+
+    fn send_delete_rows(&self, event: DeleteRowsEvent) {
+        if let Some(table_meta) = self.table_meta(event.table_id) {
+            for row in event.rows {
+                let key = Self::row_partition_key(table_meta, &row);
+                let event = DeleteRowsEvent {
+                    table_id: table_meta.table_id(),
+                    included_columns: Vec::new(),
+                    rows: vec![row],
+                };
+                self.send_binlog_event(key, EventData::DeleteRows(event));
+            }
+        }
+    }
+
+    fn table_meta(&self, table_id: u64) -> Option<&TableMeta> {
+        self.table_meta_cache
+            .get(&self.current_binlog)
+            .and_then(|cache| cache.get(&table_id))
+    }
+
+    fn send_binlog_event(&self, key: String, event_data: EventData) {
+        if self.channels.is_empty() {
+            warn!("mysql binlog event source has no channel sender");
+            return;
+        }
+
+        let record = PipelineRecord::create_mysql_binlog_event(
+            self.current_binlog.clone(),
+            key.clone(),
+            event_data,
+        );
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        let index = hasher.finish() as usize % self.channels.len();
+
+        if let Err(err) = self.channels[index].send(record) {
+            warn!("send mysql binlog event to channel error:{:?}", err);
+        }
+    }
+
+    fn row_partition_key(table_meta: &TableMeta, row: &RowEvent) -> String {
+        row.column_values
+            .get(table_meta.primary_index())
+            .map(MysqlRowEventHandler::convert_column_value_to_json)
+            .unwrap_or(Value::Null)
+            .to_string()
     }
 
     fn can_exclude(&self, database_name: &str, table_name: &str) -> bool {

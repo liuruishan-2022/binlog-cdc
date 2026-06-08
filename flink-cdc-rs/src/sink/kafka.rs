@@ -25,7 +25,7 @@ use tracing::{info, warn};
 use crate::{
     binlog::row::DebeziumFormat,
     config::{cdc::FlinkCdc, sink::Kafka},
-    pipeline::message::PipelineRecord,
+    pipeline::message::{MysqlBinlogEventRecord, PipelineRecord},
     sink::SinkStream,
 };
 
@@ -315,33 +315,58 @@ impl RskafkaSink {
             return;
         }
         match message {
-            PipelineRecord::MysqlBinlogStream(data) => {
+            PipelineRecord::MysqlDebezium(data) | PipelineRecord::MysqlBinlogStream(data) => {
                 let key = data.keys();
                 let partition = self.partition(key.as_str());
                 let record = Record::from(data);
-                if let Some(producer) = self.partition_producers.get(&partition) {
-                    match producer.produce(record).await {
-                        Ok(offset) => {
-                            info!(
-                                "send message to kafka success offset:{} partition:{}",
-                                offset, partition
-                            );
-                        }
-                        Err(err) => {
-                            warn!(
-                                "failed to produce message to kafka partition:{}, error:{:?}",
-                                partition, err
-                            );
-                        }
-                    }
-                } else {
-                    warn!("partition producer not found, partition:{}", partition);
+                self.produce_record(partition, record).await;
+            }
+            PipelineRecord::MysqlBinlogEvent(data) => {
+                let partition = self.partition(data.key());
+                match Self::binlog_event_record(data) {
+                    Ok(record) => self.produce_record(partition, record).await,
+                    Err(err) => warn!("serialize mysql binlog event to kafka record error:{err:?}"),
                 }
             }
             _ => {
                 warn!("not right pipeline record type")
             }
         }
+    }
+
+    async fn produce_record(&self, partition: i32, record: Record) {
+        if let Some(producer) = self.partition_producers.get(&partition) {
+            match producer.produce(record).await {
+                Ok(offset) => {
+                    info!(
+                        "send message to kafka success offset:{} partition:{}",
+                        offset, partition
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to produce message to kafka partition:{}, error:{:?}",
+                        partition, err
+                    );
+                }
+            }
+        } else {
+            warn!("partition producer not found, partition:{}", partition);
+        }
+    }
+
+    fn binlog_event_record(data: MysqlBinlogEventRecord) -> Result<Record, serde_json::Error> {
+        let key = data.key().to_string();
+        let body = serde_json::to_vec(&data)?;
+        let headers =
+            std::collections::BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
+
+        Ok(Record {
+            key: Some(key.into_bytes()),
+            value: Some(body),
+            headers,
+            timestamp: chrono::Utc::now(),
+        })
     }
 
     pub async fn send_records(&self, messages: Vec<PipelineRecord>) {

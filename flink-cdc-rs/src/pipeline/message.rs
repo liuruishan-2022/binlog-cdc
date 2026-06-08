@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use mysql_binlog_connector_rust::event::event_data::EventData;
 use serde::{Deserialize, Serialize};
 
 use crate::binlog::row::DebeziumFormat;
@@ -10,6 +11,8 @@ use crate::binlog::row::DebeziumFormat;
 
 #[derive(Serialize, Deserialize)]
 pub enum PipelineRecord {
+    MysqlDebezium(DebeziumFormat),
+    MysqlBinlogEvent(MysqlBinlogEventRecord),
     MysqlBinlogStream(DebeziumFormat),
     KafkaDebezium(KafkaDebezium),
     Mysqldump(Mysqldump),
@@ -25,11 +28,71 @@ impl PipelineRecord {
     pub fn create_mysql_binlog_stream(data: DebeziumFormat) -> Self {
         return PipelineRecord::MysqlBinlogStream(data);
     }
+
+    pub fn create_mysql_debezium(data: DebeziumFormat) -> Self {
+        return PipelineRecord::MysqlDebezium(data);
+    }
+
+    pub fn create_mysql_binlog_event(binlog: String, key: String, event_data: EventData) -> Self {
+        return PipelineRecord::MysqlBinlogEvent(MysqlBinlogEventRecord::new(
+            binlog, key, event_data,
+        ));
+    }
 }
 
 impl Display for PipelineRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "pipeline record:{}", self)
+        match self {
+            PipelineRecord::MysqlDebezium(data) => write!(f, "mysql debezium:{}", data),
+            PipelineRecord::MysqlBinlogEvent(data) => write!(f, "mysql binlog event:{}", data),
+            PipelineRecord::MysqlBinlogStream(data) => write!(f, "mysql binlog stream:{}", data),
+            PipelineRecord::KafkaDebezium(data) => write!(f, "kafka debezium:{}", data),
+            PipelineRecord::Mysqldump(data) => write!(f, "mysqldump:{}", data),
+            PipelineRecord::MysqlBinlogFile(data) => write!(f, "mysql binlog file:{}", data),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MysqlBinlogEventRecord {
+    binlog: String,
+    key: String,
+    event_data: EventData,
+}
+
+impl MysqlBinlogEventRecord {
+    pub fn new(binlog: String, key: String, event_data: EventData) -> Self {
+        MysqlBinlogEventRecord {
+            binlog,
+            key,
+            event_data,
+        }
+    }
+
+    pub fn binlog(&self) -> &str {
+        self.binlog.as_str()
+    }
+
+    pub fn key(&self) -> &str {
+        self.key.as_str()
+    }
+
+    pub fn event_data(&self) -> &EventData {
+        &self.event_data
+    }
+
+    pub fn into_event_data(self) -> EventData {
+        self.event_data
+    }
+}
+
+impl Display for MysqlBinlogEventRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "binlog:{} key:{} event:{:?}",
+            self.binlog, self.key, self.event_data
+        )
     }
 }
 
