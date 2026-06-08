@@ -162,7 +162,10 @@ impl<'a> MysqldumpSource<'a> {
             if (line_bytes[0] == b'/' && line_bytes[1] == b'*')
                 || (line_bytes[0] == b'-' && line_bytes[1] == b'-')
             {
-                debug!("comment line, discard:{}", String::from_utf8_lossy(&line_bytes));
+                debug!(
+                    "comment line, discard:{}",
+                    String::from_utf8_lossy(&line_bytes)
+                );
                 line_bytes.clear();
                 continue;
             }
@@ -313,14 +316,21 @@ impl<'a> MysqldumpSource<'a> {
     }
 
     fn send_debezium(&self, debezium: DebeziumFormat) {
-        let meta = SourceMeta::mysqldump(debezium.source_table().unwrap_or_default());
         let key = debezium.keys();
-        let record = resolve_record(PipelineRecord::new(debezium, meta), &self.resolver);
+        let data = Mysqldump::new(
+            debezium,
+            String::from(""),
+            debezium.source_table().unwrap_or_default().to_string(),
+        );
+        let record = PipelineRecord::Mysqldump(data);
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
         if let Err(err) = self.channels[index].send(record) {
-            warn!("failed to send mysqldump Debezium data to channel:{:?}", err);
+            warn!(
+                "failed to send mysqldump Debezium data to channel:{:?}",
+                err
+            );
         }
     }
 }

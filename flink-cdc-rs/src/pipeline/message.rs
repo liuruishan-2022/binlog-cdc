@@ -63,6 +63,16 @@ pub struct Mysqldump {
     table: String,
 }
 
+impl Mysqldump {
+    pub fn new(data: DebeziumFormat, file: String, table: String) -> Self {
+        Mysqldump {
+            data: data,
+            file: file,
+            table: table,
+        }
+    }
+}
+
 impl Display for Mysqldump {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
