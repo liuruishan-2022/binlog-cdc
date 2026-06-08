@@ -1,4 +1,3 @@
-use prometheus_client::metrics::info;
 use tracing::info;
 
 use crate::pipeline::message::PipelineRecord;

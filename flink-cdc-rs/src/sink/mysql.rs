@@ -6,7 +6,8 @@ use tracing::info;
 use tracing::warn;
 
 use crate::binlog::row::DebeziumFormat;
-use crate::pipeline::message::{PipelineRecord, SinkTarget};
+use crate::pipeline::message::KafkaDebezium;
+use crate::pipeline::message::PipelineRecord;
 use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
 
 ///
@@ -127,17 +128,16 @@ impl MysqlSink {
     }
 
     pub async fn process_record(&self, record: &PipelineRecord) {
-        let table = match record.target().and_then(SinkTarget::mysql_table) {
-            Some(table) => table,
-            None => {
-                warn!(
-                    "mysql sink record has no mysql table target: {:?}",
-                    record.target()
-                );
-                return;
+        match record {
+            PipelineRecord::KafkaDebezium(data) => {
+                let table = data.data().source_table().unwrap_or_default();
+                let topic = data.topic();
+                self.process(data.data(), topic).await;
             }
-        };
-        self.process(record.event(), &table).await;
+            _ => {
+                warn!("unknown type do data process");
+            }
+        }
     }
 
     async fn desc_table(&self, table: &str) -> TableMeta {

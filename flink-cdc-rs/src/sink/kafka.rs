@@ -1,11 +1,10 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
     sync::Arc,
     time::Duration,
 };
 
-use chrono::Utc;
 use rdkafka::{
     ClientConfig,
     error::KafkaError,
@@ -26,7 +25,7 @@ use tracing::{info, warn};
 use crate::{
     binlog::row::DebeziumFormat,
     config::{cdc::FlinkCdc, sink::Kafka},
-    pipeline::message::{PipelineRecord, SinkTarget},
+    pipeline::message::PipelineRecord,
     sink::SinkStream,
 };
 
@@ -311,37 +310,33 @@ impl RskafkaSink {
             warn!("rskafka sink has no partition producer");
             return;
         }
-
-        if let Some(SinkTarget::KafkaTopic(topic)) = message.target() {
-            if topic != &self.topic {
-                warn!(
-                    "route target kafka topic:{} differs from initialized topic:{}, using initialized topic",
-                    topic, self.topic
-                );
-            }
-        }
-
-        let key = message.keys();
-        let partition = self.partition(&key);
-        let record: Record = message.into_event().into();
-
-        if let Some(producer) = self.partition_producers.get(&partition) {
-            match producer.produce(record).await {
-                Ok(offset) => {
-                    info!(
-                        "send message to kafka success offset:{} partition:{}",
-                        offset, partition
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        "failed to produce message to kafka partition:{}, error:{:?}",
-                        partition, err
-                    );
+        match message {
+            PipelineRecord::MysqlBinlogStream(data) => {
+                let key = data.keys();
+                let partition = self.partition(key.as_str());
+                let record = Record::from(data);
+                if let Some(producer) = self.partition_producers.get(&partition) {
+                    match producer.produce(record).await {
+                        Ok(offset) => {
+                            info!(
+                                "send message to kafka success offset:{} partition:{}",
+                                offset, partition
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                "failed to produce message to kafka partition:{}, error:{:?}",
+                                partition, err
+                            );
+                        }
+                    }
+                } else {
+                    warn!("partition producer not found, partition:{}", partition);
                 }
             }
-        } else {
-            warn!("partition producer not found, partition:{}", partition);
+            _ => {
+                warn!("not right pipeline record type")
+            }
         }
     }
 
@@ -369,21 +364,6 @@ impl RskafkaSink {
             "snappy" => Compression::Snappy,
             "zstd" => Compression::Zstd,
             _ => Compression::NoCompression,
-        }
-    }
-}
-
-impl From<DebeziumFormat> for Record {
-    fn from(value: DebeziumFormat) -> Self {
-        let body = value.to_json();
-        let key = value.keys();
-        let headers = BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
-
-        Record {
-            key: Some(key.into_bytes()),
-            value: Some(body.into_bytes()),
-            headers: headers,
-            timestamp: Utc::now(),
         }
     }
 }

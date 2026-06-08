@@ -1,4 +1,4 @@
-use std::fmt::{Display, write};
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +40,16 @@ impl Display for PipelineRecord {
 pub struct KafkaDebezium {
     data: DebeziumFormat,
     topic: String,
+}
+
+impl KafkaDebezium {
+    pub fn data(&self) -> &DebeziumFormat {
+        &self.data
+    }
+
+    pub fn topic(&self) -> &str {
+        self.topic.as_str()
+    }
 }
 
 impl Display for KafkaDebezium {

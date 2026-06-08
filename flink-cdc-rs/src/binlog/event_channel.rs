@@ -125,7 +125,6 @@ impl BinlogTableMetaHandler {
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, time::Duration};
 
     use moka::{policy::EvictionPolicy, sync::Cache};
     use tracing::info;

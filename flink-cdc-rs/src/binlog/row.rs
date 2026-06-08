@@ -1,9 +1,9 @@
-use std::fmt::Display;
+use std::{collections::BTreeMap, fmt::Display};
 
 use base64::{Engine, engine::general_purpose};
-use chrono::{Local, TimeZone, offset::LocalResult};
+use chrono::{Local, TimeZone, Utc, offset::LocalResult};
 use mysql_binlog_connector_rust::{
-    column::{column_value::ColumnValue, json},
+    column::column_value::ColumnValue,
     event::{
         delete_rows_event::DeleteRowsEvent, row_event::RowEvent,
         update_rows_event::UpdateRowsEvent, write_rows_event::WriteRowsEvent,
@@ -11,6 +11,7 @@ use mysql_binlog_connector_rust::{
 };
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
+use rskafka::record::Record;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tracing::warn;
@@ -316,6 +317,21 @@ impl DebeziumFormat {
             None
         } else {
             Some(self.source.table.as_str())
+        }
+    }
+}
+
+impl From<DebeziumFormat> for Record {
+    fn from(value: DebeziumFormat) -> Self {
+        let body = value.to_json();
+        let key = value.keys();
+        let headers = BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
+
+        Record {
+            key: Some(key.into_bytes()),
+            value: Some(body.into_bytes()),
+            headers,
+            timestamp: Utc::now(),
         }
     }
 }
