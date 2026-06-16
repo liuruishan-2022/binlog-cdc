@@ -43,6 +43,16 @@ impl CdcConfig {
             .map(|route| route.iter().map(|ele| ele.source()).collect::<Vec<&str>>())
     }
 
+    pub fn route_sink(&self, source: &str) -> Option<&str> {
+        self.route.as_ref()?.iter().find_map(|route| {
+            if route.source() == source {
+                Some(route.sink())
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn pipeline(&self) -> Option<&Pipeline> {
         self.pipeline.as_ref()
     }

@@ -20,6 +20,7 @@ pub mod args;
 pub mod binlog;
 pub mod common;
 pub mod config;
+pub mod mysql;
 pub mod pipeline;
 pub mod savepoint;
 pub mod sink;

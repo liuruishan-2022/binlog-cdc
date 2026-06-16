@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
+    sync::Arc,
 };
 
 use base64::{Engine, engine::general_purpose};
@@ -20,11 +21,11 @@ use tracing::{info, warn};
 
 use crate::{
     binlog::row::{DebeziumFormat, MessageKey},
-    binlog::schema::{TableMeta, TableSchema},
     config::{
         CdcConfig,
         source::{Mysql, Source},
     },
+    mysql::schema::{TableMeta, TableSchema},
     pipeline::message::PipelineRecord,
     savepoint::{SavePoints, local::LocalFileSystem},
 };
@@ -36,7 +37,7 @@ pub struct MysqlDebezium<'a> {
     channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
     current_binlog: String,
     table_schema: TableSchema,
-    table_meta_cache: HashMap<String, HashMap<u64, TableMeta>>,
+    table_meta_cache: HashMap<String, HashMap<u64, Arc<TableMeta>>>,
 }
 
 impl<'a> MysqlDebezium<'a> {
@@ -162,7 +163,7 @@ impl<'a> MysqlDebezium<'a> {
 
     fn handle_write_rows(&self, event: WriteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
-            for debezium in MysqlRowEventHandler::parse_write_rows(table_meta, event) {
+            for debezium in MysqlRowEventHandler::parse_write_rows(&table_meta, event) {
                 self.send_debezium(debezium);
             }
         }
@@ -170,7 +171,7 @@ impl<'a> MysqlDebezium<'a> {
 
     fn handle_update_rows(&self, event: UpdateRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
-            for debezium in MysqlRowEventHandler::parse_update_rows(table_meta, event) {
+            for debezium in MysqlRowEventHandler::parse_update_rows(&table_meta, event) {
                 self.send_debezium(debezium);
             }
         }
@@ -178,16 +179,16 @@ impl<'a> MysqlDebezium<'a> {
 
     fn handle_delete_rows(&self, event: DeleteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
-            for debezium in MysqlRowEventHandler::parse_delete_rows(table_meta, event) {
+            for debezium in MysqlRowEventHandler::parse_delete_rows(&table_meta, event) {
                 self.send_debezium(debezium);
             }
         }
     }
 
-    fn table_meta(&self, table_id: u64) -> Option<&TableMeta> {
+    fn table_meta(&self, table_id: u64) -> Option<Arc<TableMeta>> {
         self.table_meta_cache
             .get(&self.current_binlog)
-            .and_then(|cache| cache.get(&table_id))
+            .and_then(|cache| cache.get(&table_id).cloned())
     }
 
     fn send_debezium(&self, debezium: DebeziumFormat) {
@@ -231,7 +232,7 @@ pub struct MysqlBinlogEvent<'a> {
     channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
     current_binlog: String,
     table_schema: TableSchema,
-    table_meta_cache: HashMap<String, HashMap<u64, TableMeta>>,
+    table_meta_cache: HashMap<String, HashMap<u64, Arc<TableMeta>>>,
 }
 
 impl<'a> MysqlBinlogEvent<'a> {
@@ -358,13 +359,13 @@ impl<'a> MysqlBinlogEvent<'a> {
     fn send_write_rows(&self, event: WriteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for row in event.rows {
-                let key = Self::row_partition_key(table_meta, &row);
+                let key = Self::row_partition_key(&table_meta, &row);
                 let event = WriteRowsEvent {
                     table_id: table_meta.table_id(),
                     included_columns: Vec::new(),
                     rows: vec![row],
                 };
-                self.send_binlog_event(key, EventData::WriteRows(event));
+                self.send_binlog_event(table_meta.clone(), key, EventData::WriteRows(event));
             }
         }
     }
@@ -372,14 +373,14 @@ impl<'a> MysqlBinlogEvent<'a> {
     fn send_update_rows(&self, event: UpdateRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for (before, after) in event.rows {
-                let key = Self::row_partition_key(table_meta, &before);
+                let key = Self::row_partition_key(&table_meta, &before);
                 let event = UpdateRowsEvent {
                     table_id: table_meta.table_id(),
                     included_columns_before: Vec::new(),
                     included_columns_after: Vec::new(),
                     rows: vec![(before, after)],
                 };
-                self.send_binlog_event(key, EventData::UpdateRows(event));
+                self.send_binlog_event(table_meta.clone(), key, EventData::UpdateRows(event));
             }
         }
     }
@@ -387,24 +388,24 @@ impl<'a> MysqlBinlogEvent<'a> {
     fn send_delete_rows(&self, event: DeleteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for row in event.rows {
-                let key = Self::row_partition_key(table_meta, &row);
+                let key = Self::row_partition_key(&table_meta, &row);
                 let event = DeleteRowsEvent {
                     table_id: table_meta.table_id(),
                     included_columns: Vec::new(),
                     rows: vec![row],
                 };
-                self.send_binlog_event(key, EventData::DeleteRows(event));
+                self.send_binlog_event(table_meta.clone(), key, EventData::DeleteRows(event));
             }
         }
     }
 
-    fn table_meta(&self, table_id: u64) -> Option<&TableMeta> {
+    fn table_meta(&self, table_id: u64) -> Option<Arc<TableMeta>> {
         self.table_meta_cache
             .get(&self.current_binlog)
-            .and_then(|cache| cache.get(&table_id))
+            .and_then(|cache| cache.get(&table_id).cloned())
     }
 
-    fn send_binlog_event(&self, key: String, event_data: EventData) {
+    fn send_binlog_event(&self, table_meta: Arc<TableMeta>, key: String, event_data: EventData) {
         if self.channels.is_empty() {
             warn!("mysql binlog event source has no channel sender");
             return;
@@ -413,6 +414,7 @@ impl<'a> MysqlBinlogEvent<'a> {
         let record = PipelineRecord::create_mysql_binlog_event(
             self.current_binlog.clone(),
             key.clone(),
+            table_meta,
             event_data,
         );
         let mut hasher = DefaultHasher::new();

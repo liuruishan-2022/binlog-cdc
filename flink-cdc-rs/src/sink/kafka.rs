@@ -321,6 +321,13 @@ impl RskafkaSink {
                 let record = Record::from(data);
                 self.produce_record(partition, record).await;
             }
+            PipelineRecord::RocketmqDebezium(data) => {
+                let debezium = data.into_data();
+                let key = debezium.keys();
+                let partition = self.partition(key.as_str());
+                let record = Record::from(debezium);
+                self.produce_record(partition, record).await;
+            }
             PipelineRecord::MysqlBinlogEvent(data) => {
                 let partition = self.partition(data.key());
                 match Self::binlog_event_record(data) {
@@ -357,7 +364,14 @@ impl RskafkaSink {
 
     fn binlog_event_record(data: MysqlBinlogEventRecord) -> Result<Record, serde_json::Error> {
         let key = data.key().to_string();
-        let body = serde_json::to_vec(&data)?;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "binlog": data.binlog(),
+            "key": data.key(),
+            "database": data.db_name(),
+            "table": data.table_name(),
+            "table_id": data.table_id(),
+            "event_data": data.event_data(),
+        }))?;
         let headers =
             std::collections::BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
 

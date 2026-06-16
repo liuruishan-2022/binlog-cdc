@@ -1,5 +1,11 @@
 use crate::config::CdcConfig;
+use crate::config::{sink::Sink, source::Source};
 use crate::pipeline::message::PipelineRecord;
+use crate::sink::kafka::RskafkaSink;
+use crate::sink::mysql::MysqlSink;
+use crate::source::kafka::Kafka as KafkaSource;
+use crate::source::mysql::{MysqlBinlogEvent, MysqlDebezium};
+use crate::source::rocketmq::RocketMQSource;
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
 
@@ -13,7 +19,46 @@ use crossbeam_channel::Sender;
 ///
 pub mod message;
 
-pub async fn pipeline(_cdc: &CdcConfig) {}
+pub async fn pipeline(cdc: &CdcConfig) {
+    match (cdc.source(), cdc.sink()) {
+        (Source::Kafka(kafka), Sink::Mysql(_)) => {
+            let sink = MysqlSink::create(cdc).await;
+            let source = KafkaSource::new(sink, kafka, cdc);
+            source.start().await;
+        }
+        (Source::Mysql(_), Sink::Kafka(kafka)) => {
+            let (senders, receivers) = channels(cdc);
+            let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
+            let sink_handles = sink.start();
+
+            let mode = std::env::var("MYSQL_SOURCE_MODE").unwrap_or_else(|_| "debezium".into());
+            if mode == "binlog-event" {
+                let mut source = MysqlBinlogEvent::create(cdc, senders).await;
+                source.read().await;
+            } else {
+                let mut source = MysqlDebezium::create(cdc, senders).await;
+                source.read().await;
+            }
+
+            for handle in sink_handles {
+                handle.await.expect("kafka sink task failed");
+            }
+        }
+        (Source::Rocketmq(_), Sink::Kafka(kafka)) => {
+            let (senders, receivers) = channels(cdc);
+            let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
+            let sink_handles = sink.start();
+
+            let mut source = RocketMQSource::create(cdc, senders);
+            source.read().await;
+
+            for handle in sink_handles {
+                handle.await.expect("kafka sink task failed");
+            }
+        }
+        _ => panic!("unsupported pipeline source/sink combination"),
+    }
+}
 
 fn channels(cdc: &CdcConfig) -> (Vec<Sender<PipelineRecord>>, Vec<Receiver<PipelineRecord>>) {
     let parallelism = cdc

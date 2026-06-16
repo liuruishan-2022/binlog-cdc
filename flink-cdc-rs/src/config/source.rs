@@ -15,6 +15,8 @@ pub enum Source {
     Mysql(Mysql),
     #[serde(rename = "mysqldump")]
     MysqlDump(Mysqldump),
+    #[serde(rename = "rocketmq")]
+    Rocketmq(Rocketmq),
 }
 
 ///
@@ -157,6 +159,55 @@ impl Mysqldump {
 
     pub fn filepath(&self) -> &str {
         &self.filepath
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Rocketmq {
+    name: Option<String>,
+    topic: String,
+    group: String,
+    nameserver: String,
+    tag: Option<String>,
+    #[serde(rename = "consume.from")]
+    consume_from: Option<String>,
+    #[serde(rename = "consume.thread.min")]
+    consume_thread_min: Option<u32>,
+    #[serde(rename = "consume.thread.max")]
+    consume_thread_max: Option<u32>,
+}
+
+impl Rocketmq {
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
+
+    pub fn group(&self) -> &str {
+        &self.group
+    }
+
+    pub fn nameserver(&self) -> &str {
+        &self.nameserver
+    }
+
+    pub fn tag(&self) -> &str {
+        self.tag.as_deref().unwrap_or("*")
+    }
+
+    pub fn consume_from(&self) -> &str {
+        self.consume_from.as_deref().unwrap_or("last")
+    }
+
+    pub fn consume_thread_min(&self) -> Option<u32> {
+        self.consume_thread_min
+    }
+
+    pub fn consume_thread_max(&self) -> Option<u32> {
+        self.consume_thread_max
     }
 }
 

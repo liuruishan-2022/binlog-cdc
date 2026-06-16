@@ -1,65 +1,98 @@
+use std::collections::HashMap;
+
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
-use sqlx::MySqlPool;
-use sqlx::Row;
-use tracing::info;
-use tracing::warn;
+use serde_json::Value;
+use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
+use tracing::{info, warn};
 
-use crate::binlog::row::DebeziumFormat;
+use crate::binlog::{row::DebeziumFormat, schema::ColumnMeta};
+use crate::config::CdcConfig;
 use crate::pipeline::message::PipelineRecord;
-use crate::{binlog::schema::ColumnMeta, sink::SinkStream};
+use crate::sink::SinkStream;
 
-///
-/// 放置mysql作为sink的处理代码
-/// 我在想，上一个数据源和下一个目标数据源如何交互
-/// 我们在插入到mysql的时候,首先是根据debezium的json的op决定是:删除/更新/插入的操作
-/// 然后,我们如何进行具体的操作:
-/// 1. 插入的时候，直接全部就行了
-/// 2. 更新的时候,根据primary key来决定如何更新，所有的字段,那么如何获取到primary key.定时缓存失效的方式来处理
-/// 3. 删除的时候,也是根据primary key来进行删除
-/// 还需要考虑到:如果表没有primary key,怎么处理删除和更新的动作?
-///
+/// MySQL sink for Debezium records.
 pub struct MysqlSink {
     pool: MySqlPool,
     cache: Cache<String, TableMeta>,
+    route: HashMap<String, String>,
 }
 
 impl MysqlSink {
     pub async fn new(url: &str) -> Self {
+        Self::new_with_routes(url, HashMap::new()).await
+    }
+
+    pub async fn create(config: &CdcConfig) -> Self {
+        let sink = match config.sink() {
+            crate::config::sink::Sink::Mysql(mysql) => mysql,
+            _ => panic!("mysql sink need mysql config"),
+        };
+        let route = config
+            .route()
+            .map(|routes| {
+                routes
+                    .iter()
+                    .map(|route| (route.source().to_string(), route.sink().to_string()))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        Self::new_with_routes(&sink.url(), route).await
+    }
+
+    pub async fn new_with_routes(url: &str, route: HashMap<String, String>) -> Self {
         let pool = MySqlPool::connect(url)
             .await
             .expect(format!("connect to mysql use:{} failed", url).as_str());
         let cache = Cache::new(10000);
-        MysqlSink { pool, cache }
+        MysqlSink { pool, cache, route }
     }
 
-    pub async fn table_info(&self, _source: &str) -> TableMeta {
-        let table = "sedp_biz_test.sedp_gsms_user";
-        if let Some(meta) = self.cache.get(table) {
+    pub async fn table_info(&self, source: &str) -> TableMeta {
+        let table = self.table_name(source);
+        if let Some(meta) = self.cache.get(table.as_str()) {
             return meta;
         }
 
-        self.desc_table(table).await
+        let meta = self.desc_table(table.as_str()).await;
+        self.cache.insert(table, meta.clone());
+        meta
     }
 
-    ///
-    /// 现在陷入了一个难题,是如何获取到topic的名称,因为需要根据topic来决定使用哪个表
     pub async fn delete(&self, debezium: &DebeziumFormat, topic: &str) {
         let meta = self.table_info(topic).await;
-        let where_sql = meta
-            .primary_keys()
-            .iter()
-            .map(|ele| {
-                let data = debezium
-                    .before_column(ele)
-                    .expect("fetch column data error")
-                    .to_string();
-                format!("{} = '{}'", ele, data)
-            })
-            .collect::<Vec<String>>()
-            .join(" AND ");
-        let sql = format!("DELETE FROM {} WHERE {}", meta.table(), where_sql);
-        info!("执行mysql的删除操作:{}", sql);
+        if meta.primary_keys().is_empty() {
+            warn!(
+                "skip mysql delete because table has no primary key: {}",
+                meta.table()
+            );
+            return;
+        }
+
+        let mut builder = QueryBuilder::<MySql>::new("DELETE FROM ");
+        builder.push(meta.table()).push(" WHERE ");
+        let mut separated = builder.separated(" AND ");
+        for key in meta.primary_keys() {
+            let Some(value) = debezium.before_column(key) else {
+                warn!("skip mysql delete because primary key {} missing", key);
+                return;
+            };
+            separated
+                .push(key)
+                .push(" = ")
+                .push_bind(json_to_mysql_value(value));
+        }
+
+        let result = builder.build().execute(&self.pool).await;
+        match result {
+            Ok(result) => info!(
+                "mysql delete rows:{} table:{}",
+                result.rows_affected(),
+                meta.table()
+            ),
+            Err(err) => warn!("mysql delete error:{:?} table:{}", err, meta.table()),
+        }
     }
 
     pub async fn insert_data(&self, debezium: &DebeziumFormat, topic: &str) {
@@ -67,71 +100,124 @@ impl MysqlSink {
         let columns = meta
             .columns
             .iter()
-            .map(|ele| ele.column_name().to_string())
-            .collect::<Vec<String>>()
-            .join(", ");
-        let values = meta
-            .columns
-            .iter()
-            .map(|ele| {
-                let data = debezium
-                    .after_column(ele.column_name())
-                    .map(|val| format!("{}", val.to_string()));
-                return data;
-            })
-            .filter_map(|ele| ele)
-            .collect::<Vec<String>>()
-            .join(", ");
-        let sql = format!(
-            "INSERT INTO {} ({}) VALUES ({})",
-            meta.table(),
-            columns,
-            values
-        );
-        info!("执行mysql的插入操作:{}", sql);
+            .filter(|column| debezium.after_column(column.column_name()).is_some())
+            .collect::<Vec<_>>();
+
+        if columns.is_empty() {
+            warn!(
+                "skip mysql insert because after has no known columns, topic={}",
+                topic
+            );
+            return;
+        }
+
+        let mut builder = QueryBuilder::<MySql>::new("INSERT INTO ");
+        builder.push(meta.table()).push(" (");
+        {
+            let mut column_names = builder.separated(", ");
+            for column in &columns {
+                column_names.push(column.column_name());
+            }
+        }
+        builder.push(") VALUES (");
+        {
+            let mut values = builder.separated(", ");
+            for column in &columns {
+                let value = debezium
+                    .after_column(column.column_name())
+                    .unwrap_or(&Value::Null);
+                values.push_bind(json_to_mysql_value(value));
+            }
+        }
+        builder.push(")");
+
+        let result = builder.build().execute(&self.pool).await;
+        match result {
+            Ok(result) => info!(
+                "mysql insert rows:{} table:{}",
+                result.rows_affected(),
+                meta.table()
+            ),
+            Err(err) => warn!("mysql insert error:{:?} table:{}", err, meta.table()),
+        }
     }
 
     pub async fn update_data(&self, debezium: &DebeziumFormat, topic: &str) {
         let meta = self.table_info(topic).await;
-        let set_sql = meta
+        if meta.primary_keys().is_empty() {
+            warn!(
+                "skip mysql update because table has no primary key: {}",
+                meta.table()
+            );
+            return;
+        }
+
+        let columns = meta
             .columns
             .iter()
-            .map(|ele| {
-                let data = debezium
-                    .after_column(ele.column_name())
-                    .map(|val| format!("{} = '{}'", ele.column_name(), val.to_string()));
-                return data;
+            .filter(|column| debezium.after_column(column.column_name()).is_some())
+            .filter(|column| {
+                !meta
+                    .primary_keys()
+                    .iter()
+                    .any(|key| key == column.column_name())
             })
-            .filter_map(|ele| ele)
-            .collect::<Vec<String>>()
-            .join(", ");
-        let where_sql = meta
-            .primary_keys()
-            .iter()
-            .map(|ele| {
-                let data = debezium
-                    .before_column(ele)
-                    .map(|val| format!("{} = '{}'", ele, val.to_string()));
-                return data;
-            })
-            .filter_map(|ele| ele)
-            .collect::<Vec<String>>()
-            .join(" AND ");
-        let sql = format!(
-            "UPDATE {} SET {} WHERE {}",
-            meta.table(),
-            set_sql,
-            where_sql
-        );
-        info!("执行mysql的更新操作:{}", sql);
+            .collect::<Vec<_>>();
+
+        if columns.is_empty() {
+            warn!(
+                "skip mysql update because after has no non-primary columns, topic={}",
+                topic
+            );
+            return;
+        }
+
+        let mut builder = QueryBuilder::<MySql>::new("UPDATE ");
+        builder.push(meta.table()).push(" SET ");
+        {
+            let mut set = builder.separated(", ");
+            for column in &columns {
+                let value = debezium
+                    .after_column(column.column_name())
+                    .unwrap_or(&Value::Null);
+                set.push(column.column_name())
+                    .push(" = ")
+                    .push_bind(json_to_mysql_value(value));
+            }
+        }
+        builder.push(" WHERE ");
+        {
+            let mut where_sql = builder.separated(" AND ");
+            for key in meta.primary_keys() {
+                let value = debezium
+                    .after_column(key)
+                    .or_else(|| debezium.before_column(key));
+                let Some(value) = value else {
+                    warn!("skip mysql update because primary key {} missing", key);
+                    return;
+                };
+                where_sql
+                    .push(key)
+                    .push(" = ")
+                    .push_bind(json_to_mysql_value(value));
+            }
+        }
+
+        let result = builder.build().execute(&self.pool).await;
+        match result {
+            Ok(result) => info!(
+                "mysql update rows:{} table:{}",
+                result.rows_affected(),
+                meta.table()
+            ),
+            Err(err) => warn!("mysql update error:{:?} table:{}", err, meta.table()),
+        }
     }
 
     pub async fn process_record(&self, record: &PipelineRecord) {
         match record {
             PipelineRecord::KafkaDebezium(data) => {
-                let _table = data.data().source_table().unwrap_or_default();
-                let topic = data.topic();
-                self.process(data.data(), topic).await;
+                self.process(data.data(), data.topic()).await;
             }
             _ => {
                 warn!("unknown type do data process");
@@ -151,10 +237,18 @@ impl MysqlSink {
             let key = Self::judge_primary_key(key);
 
             columns.push(ColumnMeta::new(source_position, field.to_string(), key));
-            source_position = source_position + 1;
+            source_position += 1;
         }
 
-        return TableMeta::new(table.to_string(), columns);
+        TableMeta::new(table.to_string(), columns)
+    }
+
+    fn table_name(&self, source: &str) -> String {
+        self.route
+            .get(source)
+            .cloned()
+            .or_else(|| self.route.get("*").cloned())
+            .unwrap_or_else(|| source.to_string())
     }
 
     fn judge_primary_key(key: Result<Vec<u8>, sqlx::Error>) -> bool {
@@ -178,15 +272,12 @@ impl SinkStream for MysqlSink {
     async fn process(&self, debezium: &DebeziumFormat, topic: &str) {
         match debezium.op() {
             "d" => {
-                info!("执行删除的动作");
                 self.delete(debezium, topic).await;
             }
-            "c" => {
-                info!("执行create动作");
+            "c" | "r" => {
                 self.insert_data(debezium, topic).await;
             }
             "u" => {
-                info!("执行更新的动作");
                 self.update_data(debezium, topic).await;
             }
             _ => {
@@ -196,6 +287,20 @@ impl SinkStream for MysqlSink {
     }
 
     async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
+}
+
+fn json_to_mysql_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::Bool(value) => Some(if *value {
+            "1".to_string()
+        } else {
+            "0".to_string()
+        }),
+        Value::Number(value) => Some(value.to_string()),
+        Value::String(value) => Some(value.clone()),
+        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
+    }
 }
 
 ///

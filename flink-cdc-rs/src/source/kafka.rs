@@ -52,9 +52,18 @@ where
         let stream = consumer.stream().try_for_each(|message| async move {
             info!("消费到消息内容");
 
-            let debezium =
-                serde_json::from_slice::<DebeziumFormat>(&message.payload().unwrap()).unwrap();
-            self.sink.process(&debezium, message.topic()).await;
+            let Some(payload) = message.payload() else {
+                warn!("kafka message payload is empty, topic={}", message.topic());
+                return Ok(());
+            };
+            match serde_json::from_slice::<DebeziumFormat>(payload) {
+                Ok(debezium) => self.sink.process(&debezium, message.topic()).await,
+                Err(err) => warn!(
+                    "parse kafka message as debezium error:{:?}, topic={}",
+                    err,
+                    message.topic()
+                ),
+            }
             Ok(())
         });
         stream.await.expect("stream kafka message error!");
