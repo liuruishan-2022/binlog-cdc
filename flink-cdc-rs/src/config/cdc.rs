@@ -3,6 +3,7 @@ use std::{collections::HashMap, time::Duration};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use crate::config::route::Route;
 
 ///
 /// 放置配置CDC的配置文件解析的地方，兼容flink cdc 3的yaml配置格式，获取自己需要的配置信息
@@ -365,29 +366,6 @@ impl Transform {
     }
 }
 
-///
-/// 增加route的路由的配置
-///
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Route {
-    source: String,
-    sink: String,
-    description: Option<String>,
-}
-
-impl Route {
-    pub fn source(&self) -> &str {
-        &self.source
-    }
-
-    pub fn sink(&self) -> &str {
-        &self.sink
-    }
-
-    pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
-}
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Pipeline {

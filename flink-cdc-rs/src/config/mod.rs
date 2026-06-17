@@ -2,9 +2,10 @@ use std::fs;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::cdc::{Pipeline, Route};
+use crate::config::{cdc::Pipeline, route::Route};
 
 pub mod cdc;
+pub mod route;
 pub mod sink;
 pub mod source;
 
