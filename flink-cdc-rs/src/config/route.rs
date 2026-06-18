@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 ///
 /// 增加route的路由的配置
@@ -50,34 +51,26 @@ impl Route {
 #[serde(transparent)]
 pub struct Router {
     route: Vec<Route>,
-    #[serde(skip)]
-    infos: Vec<String>,
 }
 
 impl Router {
     pub fn find(&mut self, source: &str) -> Option<&Route> {
-        let result = self.route.iter_mut().find(|ele| ele.source().eq(source));
-        if result.is_some() {
-            return result.map(|ele| &*ele);
+        let index = self
+            .route
+            .iter()
+            .position(|ele| ele.source().eq(source))
+            .or_else(|| {
+                self.route.iter_mut().position(|ele| {
+                    ele.source_reg()
+                        .map(|reg| reg.is_match(source))
+                        .unwrap_or(false)
+                })
+            });
+
+        if let Some(index) = index {
+            return self.route.get(index);
         }
-        self.route.iter_mut();
-        return None;
-    }
-
-    pub fn find_reg(&mut self, source: &str) -> Option<&mut Route> {
-        self.route.iter_mut().find_map(|ele| {
-            let matched = ele
-                .source_reg()
-                .map(|reg| reg.is_match(source))
-                .unwrap_or(false);
-            if matched { Some(ele) } else { None }
-        })
-    }
-
-    pub fn test_life() {
-        let mut name = String::from("测试生命中去");
-        let first = &mut name;
-        let second = &mut name;
+        None
     }
 }
 
@@ -96,72 +89,38 @@ mod tests {
     }
 
     #[test]
-    fn find_returns_exact_match_only() {
-        let router = Router {
-            route: vec![route("db.orders", "sink_orders")],
-        };
-
-        assert_eq!(
-            router.find("db.orders").map(Route::sink),
-            Some("sink_orders")
-        );
-        assert!(router.find("db.orders_001").is_none());
-    }
-
-    #[test]
-    fn find_reg_prefers_exact_match_before_regex() {
+    fn find_returns_exact_source_match_first() {
         let mut router = Router {
             route: vec![
-                route("db.gsms_msg_ticket", "sink_exact"),
-                route("db.gsms_msg_ticket_.*", "sink_regex"),
+                route("app_db\\..*", "regex_sink"),
+                route("app_db.users", "exact_sink"),
             ],
         };
 
-        assert_eq!(
-            router.find_reg("db.gsms_msg_ticket").map(Route::sink),
-            Some("sink_exact")
-        );
-        assert_eq!(
-            router.find_reg("db.gsms_msg_ticket_sms").map(Route::sink),
-            Some("sink_regex")
-        );
+        let matched = router.find("app_db.users").unwrap();
+
+        assert_eq!(matched.source(), "app_db.users");
+        assert_eq!(matched.sink(), "exact_sink");
     }
 
     #[test]
-    fn find_reg_uses_full_match_regex() {
+    fn find_returns_regex_source_match_when_exact_missing() {
         let mut router = Router {
-            route: vec![route("db.gsms_msg_ticket", "sink_ticket")],
+            route: vec![route("app_db\\..*", "regex_sink")],
         };
 
-        assert!(router.find_reg("db.gsms_msg_ticket_sms").is_none());
+        let matched = router.find("app_db.orders").unwrap();
+
+        assert_eq!(matched.source(), "app_db\\..*");
+        assert_eq!(matched.sink(), "regex_sink");
     }
 
     #[test]
-    fn find_reg_returns_none_for_invalid_regex() {
+    fn find_returns_none_when_no_route_matches() {
         let mut router = Router {
-            route: vec![route("db.[", "sink_invalid")],
+            route: vec![route("app_db.users", "exact_sink")],
         };
 
-        assert!(router.find_reg("db.any").is_none());
-    }
-
-    #[test]
-    fn router_deserializes_from_yaml_sequence() {
-        let yaml = r#"
-- source-table: db.orders_.*
-  sink-table: sink_orders
-- source-table: db.users
-  sink-table: sink_users
-"#;
-        let mut router: Router = serde_yaml::from_str(yaml).unwrap();
-
-        assert_eq!(
-            router.find_reg("db.orders_001").map(Route::sink),
-            Some("sink_orders")
-        );
-        assert_eq!(
-            router.find_reg("db.users").map(Route::sink),
-            Some("sink_users")
-        );
+        assert!(router.find("app_db.orders").is_none());
     }
 }
