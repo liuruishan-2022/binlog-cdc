@@ -37,3 +37,4 @@ transform:
 pipeline:
   name: sync mos 67 mostest to kafka
   parallelism: 2
+  channel.capacity: 10

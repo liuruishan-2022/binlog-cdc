@@ -332,7 +332,7 @@ impl<'a> MysqlBinlogEvent<'a> {
         let mut client = BinlogClient {
             url: self.source.url(),
             server_id: self.source.server_id(),
-            binlog_filename: binlog_file,
+            binlog_filename: binlog_file.clone(),
             binlog_position: self.source.binlog_offset(),
             gtid_enabled: false,
             gtid_set: String::new(),
@@ -342,10 +342,13 @@ impl<'a> MysqlBinlogEvent<'a> {
             keepalive_interval_secs: 60,
         };
 
-        client
-            .connect()
-            .await
-            .expect("connect to mysql read binlog file error")
+        client.connect().await.expect(
+            format!(
+                "connect to mysql read binlog file error of binlog file:{}",
+                binlog_file
+            )
+            .as_str(),
+        )
     }
 
     async fn record_table_meta(&mut self, event: TableMapEvent) {

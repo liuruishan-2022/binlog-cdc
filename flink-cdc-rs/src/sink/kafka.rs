@@ -290,11 +290,10 @@ impl RskafkaSink {
                     channels: Vec::new(),
                 };
                 let receiver = receiver.clone();
-                tokio::task::spawn_blocking(move || {
+                tokio::spawn(async move {
                     info!("rskafka sink receiver启动, index={}", index);
-                    let handle = tokio::runtime::Handle::current();
                     while let Ok(message) = receiver.recv() {
-                        handle.block_on(sink.send_message(message));
+                        sink.send_message(message).await;
                     }
                     info!("rskafka sink receiver退出, index={}", index);
                 })
