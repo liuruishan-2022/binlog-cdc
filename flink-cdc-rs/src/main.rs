@@ -45,19 +45,6 @@ async fn main() {
     let flink_cdc_path = args.flink_cdc().to_string();
 
     let registry = Arc::new(Mutex::new(Registry::default()));
-    let _registry_binlog = registry.clone();
-
-    //tokio::spawn(async move {
-    //    let config = FlinkCdc::read_from(&flink_cdc_path);
-    //    let result = binlog::start_dump(registry_binlog, &config).await;
-    //    if result.is_err() {
-    //        warn!("binlog error:{}", result.err().unwrap());
-    //        process::exit(1);
-    //    } else {
-    //        warn!("binlog read retrun,we will exit now!");
-    //        process::exit(0);
-    //    }
-    //});
 
     tokio::spawn(async move {
         let config = load_config(&flink_cdc_path);
