@@ -45,7 +45,6 @@ async fn main() {
     let flink_cdc_path = args.flink_cdc().to_string();
 
     let registry = Arc::new(Mutex::new(Registry::default()));
-
     tokio::spawn(async move {
         let config = load_config(&flink_cdc_path);
         pipeline::pipeline(&config).await;

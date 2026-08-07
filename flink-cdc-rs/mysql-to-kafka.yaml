@@ -1,18 +1,19 @@
 source:
   type: mysql
+  name: mysql-source
   hostname: 172.16.1.67
   port: 3306
   username: root
   password: dsap2018
-  tables: 'mostest_gsms.*'
+  tables: '*.*'
   server-time-zone: Asia/Shanghai
   server-id: 5710-5716
   scan.startup.mode: specific-offset
-  scan.startup.specific-offset.file: mysql-bin.006023
+  scan.startup.specific-offset.file: mysql-bin.006354
   scan.startup.specific-offset.pos: 0
 sink:
   type: kafka
-  name: Kafka-Sink
+  name: Kafka-sink
   properties.bootstrap.servers: 172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092
   properties.compression.type: lz4
   properties.max.request.size: 41943040

@@ -30,6 +30,14 @@ use crate::{
     savepoint::{SavePoints, local::LocalFileSystem},
 };
 
+///
+/// 本文件一共提供了两种mysql投递给channel的数据格式模式
+/// 1. 标准的Debezium JSON格式(但是这样子就会把解析,翻译,判断等操作的CPU压力都放在了reader端,因为reader端目前只能单线程,会有瓶颈)
+/// 2. 就是读取到标准的binlogevent事件朝向下游转发，顺带着携带过去tableSchema的Arc给下游receiver
+///    (完美解决掉前面sender/reader单线程的瓶颈问题)
+///
+/// 我们的Pipeline优先选择了BinlogEvent类型
+
 pub type MysqlSource<'a> = MysqlDebezium<'a>;
 
 pub struct MysqlDebezium<'a> {
@@ -262,43 +270,55 @@ impl<'a> MysqlBinlogEvent<'a> {
         let binlog_file = savepoint
             .load()
             .unwrap_or_else(|| self.source.binlog_filename());
-        let mut stream = self.binlog_stream(binlog_file).await;
+        let mut stream = self.binlog_stream(binlog_file.clone()).await;
 
         loop {
             match stream.read().await {
-                Ok((header, data)) => {
-                    info!("read mysql binlog event timestamp:{}", header.timestamp);
-                    match data {
-                        EventData::Rotate(event) => {
-                            info!("read new binlog:{}", event.binlog_filename);
-                            self.current_binlog = event.binlog_filename.clone();
-                            savepoint.save(&event.binlog_filename);
-                        }
-                        EventData::TableMap(event) => {
-                            self.record_table_meta(event).await;
-                        }
-                        EventData::WriteRows(event) => {
-                            self.send_write_rows(event);
-                        }
-                        EventData::UpdateRows(event) => {
-                            self.send_update_rows(event);
-                        }
-                        EventData::DeleteRows(event) => {
-                            self.send_delete_rows(event);
-                        }
-                        _ => {}
+                Ok((header, data)) => match data {
+                    EventData::Rotate(event) => {
+                        info!("read new binlog:{}", event.binlog_filename);
+                        self.current_binlog = event.binlog_filename.clone();
+                        savepoint.save(&event.binlog_filename);
                     }
-                }
+                    EventData::TableMap(event) => {
+                        self.record_table_meta(event).await;
+                    }
+                    EventData::WriteRows(event) => {
+                        self.send_write_rows(event);
+                    }
+                    EventData::UpdateRows(event) => {
+                        self.send_update_rows(event);
+                    }
+                    EventData::DeleteRows(event) => {
+                        self.send_delete_rows(event);
+                    }
+                    _ => {}
+                },
                 Err(BinlogError::IoError(err)) => {
-                    warn!("read binlog io error:{:?}", err);
+                    warn!(
+                        "read binlog io error:{:?} of binlog file:{binlog_file}",
+                        err
+                    );
                     break;
                 }
                 Err(BinlogError::UnexpectedData(err)) => {
-                    warn!("read binlog unexpected error:{}", err);
+                    warn!(
+                        "read binlog unexpected error:{:?} of binlog file:{binlog_file}",
+                        err
+                    );
                     break;
                 }
+                Err(BinlogError::ConnectError(err)) => {
+                    warn!(
+                        "connect to mysql error:{:?} of binlog file:{binlog_file}",
+                        err
+                    );
+                }
                 Err(err) => {
-                    warn!("read mysql binlog error:{:?}", err);
+                    warn!(
+                        "read mysql binlog error:{:?} of binlog file:{binlog_file}",
+                        err
+                    );
                     break;
                 }
             }
