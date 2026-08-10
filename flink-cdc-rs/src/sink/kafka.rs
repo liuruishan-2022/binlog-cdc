@@ -192,7 +192,7 @@ type PartitionProducers = HashMap<i32, Arc<BatchProducer<RecordAggregator>>>;
 pub struct RskafkaSink {
     partition_producers: PartitionProducers,
     topic: String,
-    channels: Vec<crossbeam_channel::Receiver<PipelineRecord>>,
+    channels: Vec<Receiver<PipelineRecord>>,
 }
 
 impl RskafkaSink {
@@ -219,7 +219,7 @@ impl RskafkaSink {
 
     pub async fn create_with_channels(
         config: &Kafka,
-        channels: Vec<crossbeam_channel::Receiver<PipelineRecord>>,
+        channels: Vec<Receiver<PipelineRecord>>,
     ) -> Self {
         let client = ClientBuilder::new(config.bootstrap_servers())
             .build()
@@ -279,20 +279,25 @@ impl RskafkaSink {
         return producers;
     }
 
-    pub fn start(&self) -> Vec<tokio::task::JoinHandle<()>> {
-        self.channels
-            .iter()
+    pub fn start(self) -> Vec<tokio::task::JoinHandle<()>> {
+        let RskafkaSink {
+            partition_producers,
+            topic,
+            channels,
+        } = self;
+
+        channels
+            .into_iter()
             .enumerate()
-            .map(|(index, receiver)| {
+            .map(|(index, mut receiver)| {
                 let sink = RskafkaSink {
-                    partition_producers: self.partition_producers.clone(),
-                    topic: self.topic.clone(),
+                    partition_producers: partition_producers.clone(),
+                    topic: topic.clone(),
                     channels: Vec::new(),
                 };
-                let receiver = receiver.clone();
                 tokio::spawn(async move {
                     info!("rskafka sink receiver启动, index={}", index);
-                    while let Ok(message) = receiver.recv() {
+                    while let Some(message) = receiver.recv().await {
                         sink.send_message(message).await;
                     }
                     info!("rskafka sink receiver退出, index={}", index);
@@ -301,7 +306,7 @@ impl RskafkaSink {
             .collect::<Vec<_>>()
     }
 
-    pub async fn write(&self) {
+    pub async fn write(self) {
         let handles = self.start();
         for handle in handles {
             handle.await.expect("rskafka sink write task failed");
@@ -414,4 +419,28 @@ impl SinkStream for RskafkaSink {
     async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
 
     async fn process(&self, _debezium: &DebeziumFormat, _topic: &str) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, time::Duration};
+
+    use super::RskafkaSink;
+
+    #[tokio::test]
+    async fn rskafka_workers_exit_after_all_senders_are_dropped() {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        drop(sender);
+        let sink = RskafkaSink {
+            partition_producers: HashMap::new(),
+            topic: "test".to_string(),
+            channels: vec![receiver],
+        };
+
+        let handle = sink.start().into_iter().next().unwrap();
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("worker did not exit")
+            .expect("worker panicked");
+    }
 }

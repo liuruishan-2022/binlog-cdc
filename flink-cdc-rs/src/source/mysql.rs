@@ -17,6 +17,7 @@ use mysql_binlog_connector_rust::{
     },
 };
 use serde_json::{Map, Number, Value, json};
+use tokio::sync::mpsc::Sender;
 use tracing::{info, warn};
 
 use crate::{
@@ -42,17 +43,14 @@ pub type MysqlSource<'a> = MysqlDebezium<'a>;
 
 pub struct MysqlDebezium<'a> {
     source: &'a Mysql,
-    channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    channels: Vec<Sender<PipelineRecord>>,
     current_binlog: String,
     table_schema: TableSchema,
     table_meta_cache: HashMap<String, HashMap<u64, Arc<TableMeta>>>,
 }
 
 impl<'a> MysqlDebezium<'a> {
-    pub async fn create(
-        cdc: &'a CdcConfig,
-        channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-    ) -> Self {
+    pub async fn create(cdc: &'a CdcConfig, channels: Vec<Sender<PipelineRecord>>) -> Self {
         let source = match cdc.source() {
             Source::Mysql(source) => source,
             _ => panic!("mysql source need mysql config"),
@@ -91,13 +89,13 @@ impl<'a> MysqlDebezium<'a> {
                             self.record_table_meta(event).await;
                         }
                         EventData::WriteRows(event) => {
-                            self.handle_write_rows(event);
+                            self.handle_write_rows(event).await;
                         }
                         EventData::UpdateRows(event) => {
-                            self.handle_update_rows(event);
+                            self.handle_update_rows(event).await;
                         }
                         EventData::DeleteRows(event) => {
-                            self.handle_delete_rows(event);
+                            self.handle_delete_rows(event).await;
                         }
                         _ => {}
                     }
@@ -169,26 +167,26 @@ impl<'a> MysqlDebezium<'a> {
         }
     }
 
-    fn handle_write_rows(&self, event: WriteRowsEvent) {
+    async fn handle_write_rows(&self, event: WriteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for debezium in MysqlRowEventHandler::parse_write_rows(&table_meta, event) {
-                self.send_debezium(debezium);
+                self.send_debezium(debezium).await;
             }
         }
     }
 
-    fn handle_update_rows(&self, event: UpdateRowsEvent) {
+    async fn handle_update_rows(&self, event: UpdateRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for debezium in MysqlRowEventHandler::parse_update_rows(&table_meta, event) {
-                self.send_debezium(debezium);
+                self.send_debezium(debezium).await;
             }
         }
     }
 
-    fn handle_delete_rows(&self, event: DeleteRowsEvent) {
+    async fn handle_delete_rows(&self, event: DeleteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for debezium in MysqlRowEventHandler::parse_delete_rows(&table_meta, event) {
-                self.send_debezium(debezium);
+                self.send_debezium(debezium).await;
             }
         }
     }
@@ -199,7 +197,7 @@ impl<'a> MysqlDebezium<'a> {
             .and_then(|cache| cache.get(&table_id).cloned())
     }
 
-    fn send_debezium(&self, debezium: DebeziumFormat) {
+    async fn send_debezium(&self, debezium: DebeziumFormat) {
         if self.channels.is_empty() {
             warn!("mysql source has no channel sender");
             return;
@@ -211,7 +209,7 @@ impl<'a> MysqlDebezium<'a> {
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
 
-        if let Err(err) = self.channels[index].send(record) {
+        if let Err(err) = self.channels[index].send(record).await {
             warn!("send mysql debezium to channel error:{:?}", err);
         }
     }
@@ -237,17 +235,14 @@ impl<'a> MysqlDebezium<'a> {
 
 pub struct MysqlBinlogEvent<'a> {
     source: &'a Mysql,
-    channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    channels: Vec<Sender<PipelineRecord>>,
     current_binlog: String,
     table_schema: TableSchema,
     table_meta_cache: HashMap<String, HashMap<u64, Arc<TableMeta>>>,
 }
 
 impl<'a> MysqlBinlogEvent<'a> {
-    pub async fn create(
-        cdc: &'a CdcConfig,
-        channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-    ) -> Self {
+    pub async fn create(cdc: &'a CdcConfig, channels: Vec<Sender<PipelineRecord>>) -> Self {
         let source = match cdc.source() {
             Source::Mysql(source) => source,
             _ => panic!("mysql source need mysql config"),
@@ -284,13 +279,13 @@ impl<'a> MysqlBinlogEvent<'a> {
                         self.record_table_meta(event).await;
                     }
                     EventData::WriteRows(event) => {
-                        self.send_write_rows(event);
+                        self.send_write_rows(event).await;
                     }
                     EventData::UpdateRows(event) => {
-                        self.send_update_rows(event);
+                        self.send_update_rows(event).await;
                     }
                     EventData::DeleteRows(event) => {
-                        self.send_delete_rows(event);
+                        self.send_delete_rows(event).await;
                     }
                     _ => {}
                 },
@@ -379,7 +374,7 @@ impl<'a> MysqlBinlogEvent<'a> {
         }
     }
 
-    fn send_write_rows(&self, event: WriteRowsEvent) {
+    async fn send_write_rows(&self, event: WriteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for row in event.rows {
                 let key = Self::row_partition_key(&table_meta, &row);
@@ -388,12 +383,13 @@ impl<'a> MysqlBinlogEvent<'a> {
                     included_columns: Vec::new(),
                     rows: vec![row],
                 };
-                self.send_binlog_event(table_meta.clone(), key, EventData::WriteRows(event));
+                self.send_binlog_event(table_meta.clone(), key, EventData::WriteRows(event))
+                    .await;
             }
         }
     }
 
-    fn send_update_rows(&self, event: UpdateRowsEvent) {
+    async fn send_update_rows(&self, event: UpdateRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for (before, after) in event.rows {
                 let key = Self::row_partition_key(&table_meta, &before);
@@ -403,12 +399,13 @@ impl<'a> MysqlBinlogEvent<'a> {
                     included_columns_after: Vec::new(),
                     rows: vec![(before, after)],
                 };
-                self.send_binlog_event(table_meta.clone(), key, EventData::UpdateRows(event));
+                self.send_binlog_event(table_meta.clone(), key, EventData::UpdateRows(event))
+                    .await;
             }
         }
     }
 
-    fn send_delete_rows(&self, event: DeleteRowsEvent) {
+    async fn send_delete_rows(&self, event: DeleteRowsEvent) {
         if let Some(table_meta) = self.table_meta(event.table_id) {
             for row in event.rows {
                 let key = Self::row_partition_key(&table_meta, &row);
@@ -417,7 +414,8 @@ impl<'a> MysqlBinlogEvent<'a> {
                     included_columns: Vec::new(),
                     rows: vec![row],
                 };
-                self.send_binlog_event(table_meta.clone(), key, EventData::DeleteRows(event));
+                self.send_binlog_event(table_meta.clone(), key, EventData::DeleteRows(event))
+                    .await;
             }
         }
     }
@@ -428,7 +426,12 @@ impl<'a> MysqlBinlogEvent<'a> {
             .and_then(|cache| cache.get(&table_id).cloned())
     }
 
-    fn send_binlog_event(&self, table_meta: Arc<TableMeta>, key: String, event_data: EventData) {
+    async fn send_binlog_event(
+        &self,
+        table_meta: Arc<TableMeta>,
+        key: String,
+        event_data: EventData,
+    ) {
         if self.channels.is_empty() {
             warn!("mysql binlog event source has no channel sender");
             return;
@@ -444,7 +447,7 @@ impl<'a> MysqlBinlogEvent<'a> {
         key.hash(&mut hasher);
         let index = hasher.finish() as usize % self.channels.len();
 
-        if let Err(err) = self.channels[index].send(record) {
+        if let Err(err) = self.channels[index].send(record).await {
             warn!("send mysql binlog event to channel error:{:?}", err);
         }
     }

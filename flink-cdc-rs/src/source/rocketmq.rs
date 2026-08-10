@@ -4,7 +4,7 @@ use std::sync::Arc;
 use rocketmq_client_v4::consumer::message_handler::MessageHandler;
 use rocketmq_client_v4::consumer::pull_consumer_v2::PullConsumer;
 use rocketmq_client_v4::protocols::body::message_body::MessageBody;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc::Sender};
 use tracing::{info, warn};
 
 use crate::binlog::row::DebeziumFormat;
@@ -18,14 +18,11 @@ use crate::pipeline::message::{PipelineRecord, RocketmqDebezium};
 /// to the configured Kafka sink through the common pipeline channel.
 pub struct RocketMQSource<'a> {
     source: &'a Rocketmq,
-    channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    channels: Vec<Sender<PipelineRecord>>,
 }
 
 impl<'a> RocketMQSource<'a> {
-    pub fn create(
-        cdc: &'a CdcConfig,
-        channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
-    ) -> Self {
+    pub fn create(cdc: &'a CdcConfig, channels: Vec<Sender<PipelineRecord>>) -> Self {
         let source = match cdc.source() {
             Source::Rocketmq(source) => source,
             _ => panic!("rocketmq source need rocketmq config"),
@@ -70,15 +67,15 @@ impl<'a> RocketMQSource<'a> {
 
 #[derive(Clone)]
 struct RocketMQDebeziumHandler {
-    channels: Vec<crossbeam_channel::Sender<PipelineRecord>>,
+    channels: Vec<Sender<PipelineRecord>>,
 }
 
 impl RocketMQDebeziumHandler {
-    fn new(channels: Vec<crossbeam_channel::Sender<PipelineRecord>>) -> Self {
+    fn new(channels: Vec<Sender<PipelineRecord>>) -> Self {
         Self { channels }
     }
 
-    fn send(&self, debezium: DebeziumFormat, topic: String, msg_id: String) {
+    async fn send(&self, debezium: DebeziumFormat, topic: String, msg_id: String) {
         if self.channels.is_empty() {
             warn!("rocketmq source has no channel sender");
             return;
@@ -91,7 +88,7 @@ impl RocketMQDebeziumHandler {
         let record =
             PipelineRecord::RocketmqDebezium(RocketmqDebezium::new(debezium, topic, msg_id));
 
-        if let Err(err) = self.channels[index].send(record) {
+        if let Err(err) = self.channels[index].send(record).await {
             warn!("send rocketmq debezium to channel error:{:?}", err);
         }
     }
@@ -110,6 +107,7 @@ impl MessageHandler for RocketMQDebeziumHandler {
             }
         };
 
-        self.send(debezium, message.topic.clone(), message.msg_id.clone());
+        self.send(debezium, message.topic.clone(), message.msg_id.clone())
+            .await;
     }
 }
