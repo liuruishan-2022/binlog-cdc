@@ -1,3 +1,8 @@
+use std::collections::BTreeMap;
+use std::fmt::Display;
+
+use chrono::Utc;
+use rskafka::record::Record;
 ///
 /// 放置标准的消息的格式的文件
 ///
@@ -120,6 +125,21 @@ impl Display for DebeziumFormat {
             json!(self.source),
             json!(self.key)
         )
+    }
+}
+
+impl From<DebeziumFormat> for Record {
+    fn from(value: DebeziumFormat) -> Self {
+        let body = value.to_json();
+        let key = value.keys();
+        let headers = BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
+
+        Record {
+            key: Some(key.into_bytes()),
+            value: Some(body.into_bytes()),
+            headers,
+            timestamp: Utc::now(),
+        }
     }
 }
 
