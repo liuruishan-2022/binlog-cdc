@@ -9,6 +9,7 @@ use crate::source::rocketmq::RocketMQSource;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 
+pub mod formatter;
 /// 主要是放置数据处理的Pipeline的逻辑
 /// 类似于流水线的思想去做
 ///

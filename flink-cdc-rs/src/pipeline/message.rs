@@ -1,9 +1,10 @@
 use std::{fmt::Display, sync::Arc};
 
 use mysql_binlog_connector_rust::event::event_data::EventData;
-use serde::{Deserialize, Serialize};
 
-use crate::{binlog::row::DebeziumFormat, mysql::schema::TableMeta};
+use crate::pipeline::formatter::DebeziumFormat;
+use crate::{mysql::schema::TableMeta, pipeline::formatter::ToDebeziumFormat};
+use serde::{Deserialize, Serialize};
 
 ///
 /// 决定采用顶级的enum来处理这种可变的,多变的数据对象信息
@@ -121,6 +122,12 @@ impl Display for MysqlBinlogEventRecord {
             "binlog:{} key:{} event:{:?}",
             self.binlog, self.key, self.event_data
         )
+    }
+}
+
+impl ToDebeziumFormat for MysqlBinlogEventRecord {
+    fn to(&self) -> DebeziumFormat {
+        todo!("这块需要参考以前的处理策略")
     }
 }
 
