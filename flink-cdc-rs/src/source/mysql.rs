@@ -269,7 +269,7 @@ impl<'a> MysqlBinlogEvent<'a> {
 
         loop {
             match stream.read().await {
-                Ok((header, data)) => match data {
+                Ok((_header, data)) => match data {
                     EventData::Rotate(event) => {
                         info!("read new binlog:{}", event.binlog_filename);
                         self.current_binlog = event.binlog_filename.clone();

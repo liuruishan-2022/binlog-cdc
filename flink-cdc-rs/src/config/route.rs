@@ -1,6 +1,5 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 ///
 /// 增加route的路由的配置
