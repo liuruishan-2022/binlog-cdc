@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
+use chrono::{Local, TimeZone, offset::LocalResult};
 use thiserror::Error;
+use tracing::warn;
 
 ///
 /// 定义自己项目模块的Error类型
@@ -19,6 +21,17 @@ impl Display for CdcError {
             CdcError::BinlogIo(msg) => write!(f, "BinlogIo: {}", msg),
             CdcError::BinlogUnexpected(msg) => write!(f, "BinlogUnexpected: {}", msg),
             CdcError::Other(msg) => write!(f, "Other: {}", msg),
+        }
+    }
+}
+
+pub fn format_timestamp(timestamp: i64) -> String {
+    let millis = timestamp / 1000;
+    match Local.timestamp_millis_opt(millis) {
+        LocalResult::Single(time) => time.format("%Y-%m-%d %H:%M:%S").to_string(),
+        _ => {
+            warn!("timestamp is invalid:{}!", timestamp);
+            "".to_string()
         }
     }
 }

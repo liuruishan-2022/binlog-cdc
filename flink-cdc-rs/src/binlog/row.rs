@@ -113,9 +113,7 @@ impl<'a> RowEventHandler<'a> {
         self.send_to_kafka(debezium).await;
     }
 
-    async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {
-        self.kafka_sink.send_batch_messages(debezium).await;
-    }
+    async fn send_to_kafka(&self, debezium: Vec<DebeziumFormat>) {}
 
     fn parse_rows(&self, table_meta: &TableMeta, rows: Vec<RowEvent>) -> Vec<Map<String, Value>> {
         return rows
