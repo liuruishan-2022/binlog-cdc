@@ -165,5 +165,5 @@ impl MessageKey {
 }
 
 pub trait ToDebeziumFormat {
-    fn to(&self) -> DebeziumFormat;
+    fn to(self) -> Option<Vec<DebeziumFormat>>;
 }

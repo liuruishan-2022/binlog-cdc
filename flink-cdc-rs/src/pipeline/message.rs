@@ -2,11 +2,15 @@ use std::{fmt::Display, sync::Arc};
 
 use base64::{Engine, engine::general_purpose};
 use mysql_binlog_connector_rust::column::column_value::ColumnValue;
+use mysql_binlog_connector_rust::event::delete_rows_event::DeleteRowsEvent;
 use mysql_binlog_connector_rust::event::event_data::EventData;
 use mysql_binlog_connector_rust::event::row_event::RowEvent;
 use mysql_binlog_connector_rust::event::update_rows_event::UpdateRowsEvent;
+use mysql_binlog_connector_rust::event::write_rows_event::WriteRowsEvent;
 use serde_json::Number;
 use serde_json::{Map, Value};
+use sqlx::Execute;
+use tracing::event;
 
 use crate::common;
 use crate::pipeline::formatter::{DebeziumFormat, MessageKey};
@@ -127,108 +131,138 @@ impl MysqlBinlogEventRecord {
 ///
 
 impl MysqlBinlogEventRecord {
-    pub fn parse_rows(&self, table_meta: &TableMeta) {
-        match self.event_data() {
-            EventData::WriteRows(event) => {}
-            EventData::UpdateRows(event) => {}
-            EventData::DeleteRows(event) => {}
-            _ => {}
+    pub fn parse_rows(self) -> Option<Vec<DebeziumFormat>> {
+        let table_meta = &self.table_meta();
+        match self.into_event_data() {
+            EventData::WriteRows(event) => Some(parse_write_rows(table_meta, event)),
+            EventData::UpdateRows(event) => Some(parse_update_rows(table_meta, event)),
+            EventData::DeleteRows(event) => Some(parse_delete_rows(table_meta, event)),
+            _ => None,
         }
     }
+}
 
-    fn parse_update_rows(&self, table_meta: &TableMeta, event: UpdateRowsEvent) {
-        let debezium_formats = event
-            .rows
-            .into_iter()
-            .map(|(before, after)| {
-                let before = Some(self.convert_and_parse_row(table_meta, before));
-                let after = self.convert_and_parse_row(table_meta, after);
-                (before, after)
-            })
-            .map(|(before, mut after)| {
-                let key = self.create_key(table_meta, &after);
-                DebeziumFormat::update(
-                    before.map(|b| serde_json::json!(b)),
-                    serde_json::json!(after),
-                    table_meta.db_name(),
-                    table_meta.table_name(),
-                    key,
-                )
-            })
-            .collect::<Vec<DebeziumFormat>>();
-    }
-
-    fn convert_and_parse_row(&self, table_meta: &TableMeta, row: RowEvent) -> Map<String, Value> {
-        return row
-            .column_values
-            .into_iter()
-            .enumerate()
-            .map(|(index, column)| {
-                table_meta.column(index + 1).map(|meta| {
-                    let column_name = meta.column_name();
-                    let value = self.convert_column_value_to_json(&column);
-                    return (column_name.to_string(), value);
-                })
-            })
-            .filter_map(|ele| ele)
-            .collect();
-    }
-
-    fn convert_column_value_to_json(&self, column_value: &ColumnValue) -> Value {
-        match column_value {
-            ColumnValue::Tiny(data) => Value::Number(Number::from(*data)),
-            ColumnValue::Short(data) => Value::Number(Number::from(*data)),
-            ColumnValue::Long(data) => Value::Number(Number::from(*data)),
-            ColumnValue::LongLong(data) => Value::Number(Number::from(*data)),
-            ColumnValue::Float(data) => Value::Number(Number::from_f64(*data as f64).unwrap()),
-            ColumnValue::Double(data) => Value::Number(Number::from_f64(*data).unwrap()),
-            ColumnValue::Decimal(data) => Value::String(data.to_string()),
-            ColumnValue::Time(data) => Value::String(data.to_string()),
-            ColumnValue::Date(data) => Value::String(data.to_string()),
-            ColumnValue::DateTime(data) => Value::String(data.to_string()),
-            ColumnValue::Timestamp(data) => {
-                let time_format = common::format_timestamp(*data);
-                Value::String(time_format)
-            }
-            ColumnValue::Year(data) => Value::Number(Number::from(*data)),
-            ColumnValue::String(data) => {
-                let data =
-                    String::from_utf8(data.clone()).expect("convert data to utf8 string error");
-                Value::String(data)
-            }
-            ColumnValue::Blob(data) => {
-                let data = String::from_utf8(data.clone())
-                    .unwrap_or_else(|_| general_purpose::STANDARD.encode(data));
-                Value::String(data)
-            }
-            ColumnValue::Bit(data) => Value::Number(Number::from(*data)),
-            ColumnValue::Set(data) => Value::Number(Number::from(*data)),
-            ColumnValue::Enum(data) => Value::Number(Number::from(*data)),
-            ColumnValue::Json(data) => json!(data),
-            _ => Value::Null,
-        }
-    }
-
-    fn create_key(
-        &self,
-        table_meta: &TableMeta,
-        row: &serde_json::Map<String, Value>,
-    ) -> MessageKey {
-        let column_name = table_meta.primary_column();
-        let primary = row.get(column_name).unwrap();
-        // 预分配容量为 2（主键 + TableId）
-        let mut key = serde_json::Map::with_capacity(2);
-        key.insert(column_name.to_string(), primary.clone());
-        key.insert(
-            "TableId".to_string(),
-            serde_json::json!(format!(
-                "{}.{}",
+fn parse_write_rows(table_meta: &TableMeta, event: WriteRowsEvent) -> Vec<DebeziumFormat> {
+    event
+        .rows
+        .into_iter()
+        .map(|row| {
+            let after = convert_and_parse_row(table_meta, row);
+            let key = create_key(table_meta, &after);
+            DebeziumFormat::insert(
+                serde_json::json!(after),
                 table_meta.db_name(),
-                table_meta.table_name()
-            )),
-        );
-        return MessageKey::new(key);
+                table_meta.table_name(),
+                key,
+            )
+        })
+        .collect()
+}
+
+fn parse_update_rows(table_meta: &TableMeta, event: UpdateRowsEvent) -> Vec<DebeziumFormat> {
+    event
+        .rows
+        .into_iter()
+        .map(|(before, after)| {
+            let before = Some(convert_and_parse_row(table_meta, before));
+            let after = convert_and_parse_row(table_meta, after);
+            (before, after)
+        })
+        .map(|(before, after)| {
+            let key = create_key(table_meta, &after);
+            DebeziumFormat::update(
+                before.map(|b| serde_json::json!(b)),
+                serde_json::json!(after),
+                table_meta.db_name(),
+                table_meta.table_name(),
+                key,
+            )
+        })
+        .collect::<Vec<DebeziumFormat>>()
+}
+
+fn parse_delete_rows(table_meta: &TableMeta, event: DeleteRowsEvent) -> Vec<DebeziumFormat> {
+    event
+        .rows
+        .into_iter()
+        .map(|row| {
+            let after = convert_and_parse_row(table_meta, row);
+            let key = create_key(table_meta, &after);
+            DebeziumFormat::insert(
+                serde_json::json!(after),
+                table_meta.db_name(),
+                table_meta.table_name(),
+                key,
+            )
+        })
+        .collect()
+}
+
+fn convert_and_parse_row(table_meta: &TableMeta, row: RowEvent) -> Map<String, Value> {
+    return row
+        .column_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, column)| {
+            table_meta.column(index + 1).map(|meta| {
+                let column_name = meta.column_name();
+                let value = convert_column_value_to_json(&column);
+                return (column_name.to_string(), value);
+            })
+        })
+        .filter_map(|ele| ele)
+        .collect();
+}
+
+fn convert_column_value_to_json(column_value: &ColumnValue) -> Value {
+    match column_value {
+        ColumnValue::Tiny(data) => Value::Number(Number::from(*data)),
+        ColumnValue::Short(data) => Value::Number(Number::from(*data)),
+        ColumnValue::Long(data) => Value::Number(Number::from(*data)),
+        ColumnValue::LongLong(data) => Value::Number(Number::from(*data)),
+        ColumnValue::Float(data) => Value::Number(Number::from_f64(*data as f64).unwrap()),
+        ColumnValue::Double(data) => Value::Number(Number::from_f64(*data).unwrap()),
+        ColumnValue::Decimal(data) => Value::String(data.to_string()),
+        ColumnValue::Time(data) => Value::String(data.to_string()),
+        ColumnValue::Date(data) => Value::String(data.to_string()),
+        ColumnValue::DateTime(data) => Value::String(data.to_string()),
+        ColumnValue::Timestamp(data) => {
+            let time_format = common::format_timestamp(*data);
+            Value::String(time_format)
+        }
+        ColumnValue::Year(data) => Value::Number(Number::from(*data)),
+        ColumnValue::String(data) => {
+            let data = String::from_utf8(data.clone()).expect("convert data to utf8 string error");
+            Value::String(data)
+        }
+        ColumnValue::Blob(data) => {
+            let data = String::from_utf8(data.clone())
+                .unwrap_or_else(|_| general_purpose::STANDARD.encode(data));
+            Value::String(data)
+        }
+        ColumnValue::Bit(data) => Value::Number(Number::from(*data)),
+        ColumnValue::Set(data) => Value::Number(Number::from(*data)),
+        ColumnValue::Enum(data) => Value::Number(Number::from(*data)),
+        ColumnValue::Json(data) => serde_json::json!(data),
+        _ => Value::Null,
     }
+}
+
+fn create_key(table_meta: &TableMeta, row: &serde_json::Map<String, Value>) -> MessageKey {
+    let column_name = table_meta.primary_column();
+    let primary = row.get(column_name).unwrap();
+    // 预分配容量为 2（主键 + TableId）
+    let mut key = serde_json::Map::with_capacity(2);
+    key.insert(column_name.to_string(), primary.clone());
+    key.insert(
+        "TableId".to_string(),
+        serde_json::json!(format!(
+            "{}.{}",
+            table_meta.db_name(),
+            table_meta.table_name()
+        )),
+    );
+    return MessageKey::new(key);
 }
 
 impl Display for MysqlBinlogEventRecord {
@@ -242,8 +276,8 @@ impl Display for MysqlBinlogEventRecord {
 }
 
 impl ToDebeziumFormat for MysqlBinlogEventRecord {
-    fn to(&self) -> DebeziumFormat {
-        todo!("这块需要参考以前的处理策略")
+    fn to(self) -> Option<Vec<DebeziumFormat>> {
+        self.parse_rows()
     }
 }
 

@@ -24,8 +24,10 @@ use tracing::{info, warn};
 
 use crate::{
     config::{cdc::FlinkCdc, sink::Kafka},
-    pipeline::formatter::DebeziumFormat,
-    pipeline::message::{MysqlBinlogEventRecord, PipelineRecord},
+    pipeline::{
+        formatter::{DebeziumFormat, ToDebeziumFormat},
+        message::{MysqlBinlogEventRecord, PipelineRecord},
+    },
     sink::SinkStream,
 };
 
@@ -318,29 +320,42 @@ impl RskafkaSink {
             warn!("rskafka sink has no partition producer");
             return;
         }
+
+        if let Some((partition, records)) = self.message_records(message) {
+            self.produce_records(partition, records).await;
+        }
+    }
+
+    fn message_records(&self, message: PipelineRecord) -> Option<(i32, Vec<Record>)> {
         match message {
             PipelineRecord::MysqlDebezium(data) | PipelineRecord::MysqlBinlogStream(data) => {
                 let key = data.keys();
                 let partition = self.partition(key.as_str());
                 let record = Record::from(data);
-                self.produce_record(partition, record).await;
+                Some((partition, vec![record]))
             }
             PipelineRecord::RocketmqDebezium(data) => {
                 let debezium = data.into_data();
                 let key = debezium.keys();
                 let partition = self.partition(key.as_str());
                 let record = Record::from(debezium);
-                self.produce_record(partition, record).await;
+                Some((partition, vec![record]))
             }
             PipelineRecord::MysqlBinlogEvent(data) => {
                 let partition = self.partition(data.key());
                 match Self::binlog_event_record(data) {
-                    Ok(record) => self.produce_record(partition, record).await,
-                    Err(err) => warn!("serialize mysql binlog event to kafka record error:{err:?}"),
+                    Some(records) => Some((partition, records)),
+                    None => {
+                        warn!(
+                            "skip mysql binlog event because it cannot be converted to kafka records"
+                        );
+                        None
+                    }
                 }
             }
             _ => {
-                warn!("not right pipeline record type")
+                warn!("not right pipeline record type");
+                None
             }
         }
     }
@@ -366,31 +381,86 @@ impl RskafkaSink {
         }
     }
 
-    fn binlog_event_record(data: MysqlBinlogEventRecord) -> Result<Record, serde_json::Error> {
-        let key = data.key().to_string();
-        let body = serde_json::to_vec(&serde_json::json!({
-            "binlog": data.binlog(),
-            "key": data.key(),
-            "database": data.db_name(),
-            "table": data.table_name(),
-            "table_id": data.table_id(),
-            "event_data": data.event_data(),
-        }))?;
-        let headers =
-            std::collections::BTreeMap::from([("key".to_string(), key.clone().into_bytes())]);
+    async fn produce_records(&self, partition: i32, records: Vec<Record>) {
+        if records.is_empty() {
+            return;
+        }
 
-        Ok(Record {
-            key: Some(key.into_bytes()),
-            value: Some(body),
-            headers,
-            timestamp: chrono::Utc::now(),
-        })
+        if records.len() == 1 {
+            let mut records = records;
+            if let Some(record) = records.pop() {
+                self.produce_record(partition, record).await;
+            }
+            return;
+        }
+
+        if let Some(producer) = self.partition_producers.get(&partition) {
+            let count = records.len();
+            let results = futures_util::future::join_all(
+                records.into_iter().map(|record| producer.produce(record)),
+            )
+            .await;
+
+            let mut offsets = Vec::with_capacity(count);
+            let mut failed = 0;
+            for result in results {
+                match result {
+                    Ok(offset) => offsets.push(offset),
+                    Err(err) => {
+                        failed += 1;
+                        warn!(
+                            "failed to produce batch message to kafka partition:{}, error:{:?}",
+                            partition, err
+                        );
+                    }
+                }
+            }
+
+            if !offsets.is_empty() {
+                info!(
+                    "send batch messages to kafka success count:{} failed:{} partition:{} offsets:{:?}",
+                    offsets.len(),
+                    failed,
+                    partition,
+                    offsets
+                );
+            }
+        } else {
+            warn!("partition producer not found, partition:{}", partition);
+        }
+    }
+
+    fn binlog_event_record(data: MysqlBinlogEventRecord) -> Option<Vec<Record>> {
+        return data.to().map(|debezium_formats| {
+            debezium_formats
+                .into_iter()
+                .map(|ele| Record::from(ele))
+                .collect::<Vec<Record>>()
+        });
     }
 
     pub async fn send_records(&self, messages: Vec<PipelineRecord>) {
-        for msg in messages {
-            self.send_message(msg).await;
+        if self.partition_producers.is_empty() {
+            warn!("rskafka sink has no partition producer");
+            return;
         }
+
+        let mut partition_records: HashMap<i32, Vec<Record>> = HashMap::new();
+        for msg in messages {
+            if let Some((partition, records)) = self.message_records(msg) {
+                partition_records
+                    .entry(partition)
+                    .or_default()
+                    .extend(records);
+            }
+        }
+
+        futures_util::future::join_all(
+            partition_records
+                .into_iter()
+                .map(|(partition, records)| self.produce_records(partition, records)),
+        )
+        .await;
     }
 
     pub fn hash_code(source: &str) -> u64 {
