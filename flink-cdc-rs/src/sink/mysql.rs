@@ -6,8 +6,9 @@ use serde_json::Value;
 use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
 use tracing::{info, warn};
 
-use crate::binlog::{row::DebeziumFormat, schema::ColumnMeta};
+use crate::binlog::schema::ColumnMeta;
 use crate::config::CdcConfig;
+use crate::pipeline::formatter::DebeziumFormat;
 use crate::pipeline::message::PipelineRecord;
 use crate::sink::SinkStream;
 

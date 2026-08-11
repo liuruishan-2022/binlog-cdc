@@ -23,8 +23,8 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{info, warn};
 
 use crate::{
-    binlog::row::DebeziumFormat,
     config::{cdc::FlinkCdc, sink::Kafka},
+    pipeline::formatter::DebeziumFormat,
     pipeline::message::{MysqlBinlogEventRecord, PipelineRecord},
     sink::SinkStream,
 };

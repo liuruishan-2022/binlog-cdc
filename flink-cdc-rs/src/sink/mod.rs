@@ -1,4 +1,4 @@
-use crate::binlog::row::DebeziumFormat;
+use crate::pipeline::formatter::DebeziumFormat;
 
 pub mod console;
 pub mod kafka;

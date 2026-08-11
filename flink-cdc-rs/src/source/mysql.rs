@@ -21,12 +21,12 @@ use tokio::sync::mpsc::Sender;
 use tracing::{info, warn};
 
 use crate::{
-    binlog::row::{DebeziumFormat, MessageKey},
     config::{
         CdcConfig,
         source::{Mysql, Source},
     },
     mysql::schema::{TableMeta, TableSchema},
+    pipeline::formatter::{DebeziumFormat, MessageKey},
     pipeline::message::PipelineRecord,
     savepoint::{SavePoints, local::LocalFileSystem},
 };

@@ -7,8 +7,8 @@ use rdkafka::{
 use tracing::{info, warn};
 
 use crate::{
-    binlog::row::DebeziumFormat,
     config::{CdcConfig, source::Kafka as KafkaConfig},
+    pipeline::formatter::DebeziumFormat,
     sink::SinkStream,
 };
 

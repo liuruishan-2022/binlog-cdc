@@ -20,11 +20,11 @@ use walkdir::WalkDir;
 use zip::ZipArchive;
 
 use crate::{
-    binlog::row::{DebeziumFormat, MessageKey},
     config::{
         CdcConfig,
         source::{Mysqldump, Source},
     },
+    pipeline::formatter::{DebeziumFormat, MessageKey},
     pipeline::message::PipelineRecord,
 };
 

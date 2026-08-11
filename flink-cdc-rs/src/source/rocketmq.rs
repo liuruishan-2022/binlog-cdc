@@ -7,9 +7,9 @@ use rocketmq_client_v4::protocols::body::message_body::MessageBody;
 use tokio::sync::{RwLock, mpsc::Sender};
 use tracing::{info, warn};
 
-use crate::binlog::row::DebeziumFormat;
 use crate::config::CdcConfig;
 use crate::config::source::{Rocketmq, Source};
+use crate::pipeline::formatter::DebeziumFormat;
 use crate::pipeline::message::{PipelineRecord, RocketmqDebezium};
 
 /// RocketMQ 4.x remoting source.
