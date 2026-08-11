@@ -288,63 +288,7 @@ impl Dumper {
         }
     }
 
-    fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>, config: &FlinkCdc) {
-        let table_handler = Arc::clone(&self.table_meta_handler);
-        let kafka_sink = Arc::clone(&self.kafka_sink);
-        receivers.into_iter().for_each(|receiver| {
-            let table_handler = Arc::clone(&table_handler);
-            let row_handler = BinlogRowEventHandler::new(config);
-            let kafka_sink = Arc::clone(&kafka_sink);
-            let metrics = self.metrics.clone();
-            tokio::spawn(async move {
-                for binlog_event in receiver.iter() {
-                    match binlog_event.event_data {
-                        EventData::WriteRows(event) => {
-                            let table_meta =
-                                table_handler.table_schema(&binlog_event.binlog, event.table_id);
-                            if let Some(table_meta) = table_meta {
-                                let debezium_formats =
-                                    row_handler.parse_write_rows(&table_meta, event);
-                                metrics.inc_flink_sink_kafka_message(
-                                    "create",
-                                    debezium_formats.len() as u64,
-                                );
-                                kafka_sink.send_batch_messages(debezium_formats).await;
-                            }
-                        }
-                        EventData::UpdateRows(event) => {
-                            let table_meta =
-                                table_handler.table_schema(&binlog_event.binlog, event.table_id);
-                            if let Some(table_meta) = table_meta {
-                                let debezium_formats =
-                                    row_handler.parse_update_rows(&table_meta, event);
-                                metrics.inc_flink_sink_kafka_message(
-                                    "update",
-                                    debezium_formats.len() as u64,
-                                );
-                                kafka_sink.send_batch_messages(debezium_formats).await;
-                            }
-                        }
-                        EventData::DeleteRows(event) => {
-                            let table_meta =
-                                table_handler.table_schema(&binlog_event.binlog, event.table_id);
-                            if let Some(table_meta) = table_meta {
-                                let debezium_formats =
-                                    row_handler.parse_delete_rows(&table_meta, event);
-                                metrics.inc_flink_sink_kafka_message(
-                                    "delete",
-                                    debezium_formats.len() as u64,
-                                );
-                                kafka_sink.send_batch_messages(debezium_formats).await;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                info!("receiver channel closed, exiting receiver task");
-            });
-        });
-    }
+    fn start_receivers(&self, receivers: Vec<Receiver<BinlogEventData>>, config: &FlinkCdc) {}
 
     fn channels(&self) -> (Vec<Sender<BinlogEventData>>, Vec<Receiver<BinlogEventData>>) {
         let (senders, receivers): (Vec<_>, Vec<_>) = (1..=self.parallelism)
