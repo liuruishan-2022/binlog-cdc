@@ -14,7 +14,7 @@ use rdkafka::{
 use rskafka::{
     client::{
         Client, ClientBuilder,
-        partition::Compression,
+        partition::{Compression, PartitionClient},
         producer::{BatchProducer, BatchProducerBuilder, aggregator::RecordAggregator},
     },
     record::Record,
@@ -189,7 +189,14 @@ impl SinkStream for SpmcKafkaSink {
 /// rdkafka存在一定的效率问题，所以还是使用rskafka组件
 ///
 
-type PartitionProducers = HashMap<i32, Arc<BatchProducer<RecordAggregator>>>;
+#[derive(Clone)]
+struct PartitionProducer {
+    batch_producer: Arc<BatchProducer<RecordAggregator>>,
+    partition_client: Arc<PartitionClient>,
+    compression: Compression,
+}
+
+type PartitionProducers = HashMap<i32, PartitionProducer>;
 
 pub struct RskafkaSink {
     partition_producers: PartitionProducers,
@@ -260,6 +267,7 @@ impl RskafkaSink {
             .expect(format!("topic:{} not exists!", topic).as_str());
 
         let mut producers = PartitionProducers::new();
+        let compression = RskafkaSink::compression(compression_type);
         for partition in &metadata.partitions {
             let partition_client = client
                 .partition_client(
@@ -271,11 +279,18 @@ impl RskafkaSink {
                 .expect("failed to load partition metadata...");
 
             let partition_client = Arc::new(partition_client);
-            let producer = BatchProducerBuilder::new(partition_client)
-                .with_compression(RskafkaSink::compression(compression_type))
+            let batch_producer = BatchProducerBuilder::new(partition_client.clone())
+                .with_compression(compression)
                 .with_linger(Duration::from_millis(linger_ms as u64))
                 .build(RecordAggregator::new(batch_size as usize));
-            producers.insert(*partition, Arc::new(producer));
+            producers.insert(
+                *partition,
+                PartitionProducer {
+                    batch_producer: Arc::new(batch_producer),
+                    partition_client,
+                    compression,
+                },
+            );
         }
 
         return producers;
@@ -362,7 +377,7 @@ impl RskafkaSink {
 
     async fn produce_record(&self, partition: i32, record: Record) {
         if let Some(producer) = self.partition_producers.get(&partition) {
-            match producer.produce(record).await {
+            match producer.batch_producer.produce(record).await {
                 Ok(offset) => {
                     info!(
                         "send message to kafka success offset:{} partition:{}",
@@ -382,48 +397,25 @@ impl RskafkaSink {
     }
 
     async fn produce_records(&self, partition: i32, records: Vec<Record>) {
-        if records.is_empty() {
-            return;
-        }
-
-        if records.len() == 1 {
-            let mut records = records;
-            if let Some(record) = records.pop() {
-                self.produce_record(partition, record).await;
-            }
-            return;
-        }
-
         if let Some(producer) = self.partition_producers.get(&partition) {
             let count = records.len();
-            let results = futures_util::future::join_all(
-                records.into_iter().map(|record| producer.produce(record)),
-            )
-            .await;
-
-            let mut offsets = Vec::with_capacity(count);
-            let mut failed = 0;
-            for result in results {
-                match result {
-                    Ok(offset) => offsets.push(offset),
-                    Err(err) => {
-                        failed += 1;
-                        warn!(
-                            "failed to produce batch message to kafka partition:{}, error:{:?}",
-                            partition, err
-                        );
-                    }
+            match producer
+                .partition_client
+                .produce(records, producer.compression)
+                .await
+            {
+                Ok(offsets) => {
+                    info!(
+                        "send batch messages to kafka success count:{} partition:{} offsets:{:?}",
+                        count, partition, offsets
+                    );
                 }
-            }
-
-            if !offsets.is_empty() {
-                info!(
-                    "send batch messages to kafka success count:{} failed:{} partition:{} offsets:{:?}",
-                    offsets.len(),
-                    failed,
-                    partition,
-                    offsets
-                );
+                Err(err) => {
+                    warn!(
+                        "failed to produce batch messages to kafka partition:{}, count:{}, error:{:?}",
+                        partition, count, err
+                    );
+                }
             }
         } else {
             warn!("partition producer not found, partition:{}", partition);
