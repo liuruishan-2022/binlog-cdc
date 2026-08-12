@@ -16,7 +16,7 @@ use mysql_binlog_connector_rust::{
         write_rows_event::WriteRowsEvent,
     },
 };
-use prometheus_client::{metrics, registry::Registry};
+use prometheus_client::registry::Registry;
 use serde_json::{Map, Number, Value, json};
 use tokio::sync::{Mutex, mpsc::Sender};
 use tracing::{info, warn};

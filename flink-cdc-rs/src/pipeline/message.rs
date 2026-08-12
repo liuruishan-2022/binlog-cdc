@@ -9,8 +9,6 @@ use mysql_binlog_connector_rust::event::update_rows_event::UpdateRowsEvent;
 use mysql_binlog_connector_rust::event::write_rows_event::WriteRowsEvent;
 use serde_json::Number;
 use serde_json::{Map, Value};
-use sqlx::Execute;
-use tracing::event;
 
 use crate::common;
 use crate::pipeline::formatter::{DebeziumFormat, MessageKey};
