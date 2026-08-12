@@ -5,7 +5,6 @@ use prometheus_client::{
     registry::Registry,
 };
 
-pub mod event_channel;
 pub mod schema;
 
 ///

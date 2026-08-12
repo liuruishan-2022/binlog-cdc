@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::config::CdcConfig;
 use crate::config::{sink::Sink, source::Source};
 use crate::pipeline::message::PipelineRecord;
@@ -6,6 +8,8 @@ use crate::sink::mysql::MysqlSink;
 use crate::source::kafka::Kafka as KafkaSource;
 use crate::source::mysql::MysqlBinlogEvent;
 use crate::source::rocketmq::RocketMQSource;
+use prometheus_client::registry::Registry;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 
@@ -20,7 +24,7 @@ pub mod formatter;
 ///
 pub mod message;
 
-pub async fn pipeline(cdc: &CdcConfig) {
+pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
     match (cdc.source(), cdc.sink()) {
         (Source::Kafka(kafka), Sink::Mysql(_)) => {
             tracing::info!("kafka--->mysql");
@@ -34,7 +38,7 @@ pub async fn pipeline(cdc: &CdcConfig) {
             let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
             let sink_handles = sink.start();
 
-            let mut source = MysqlBinlogEvent::create(cdc, senders).await;
+            let mut source = MysqlBinlogEvent::create(cdc, senders, registry).await;
             source.read().await;
             drop(source);
 

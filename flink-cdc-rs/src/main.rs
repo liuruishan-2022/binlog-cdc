@@ -47,7 +47,7 @@ async fn main() {
     let registry = Arc::new(Mutex::new(Registry::default()));
     tokio::spawn(async move {
         let config = load_config(&flink_cdc_path);
-        pipeline::pipeline(&config).await;
+        pipeline::pipeline(&config, registry.clone()).await;
     });
 
     let registry_metrics = registry.clone();

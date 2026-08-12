@@ -9,6 +9,11 @@ use tracing::warn;
 use crate::binlog::Metrics;
 
 ///
+/// 目前这个mod下放置一些杂项，暂时不多，所以不做拆分，暂时放置如下的信息
+/// 1. 错误类型
+/// 2. 监控的lables这些
+
+///
 /// 定义自己项目模块的Error类型
 ///
 
