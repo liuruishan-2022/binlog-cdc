@@ -17,7 +17,6 @@ use crate::{args::arguments::Args, config::load_config};
 use clap::Parser;
 
 pub mod args;
-pub mod binlog;
 pub mod common;
 pub mod config;
 pub mod mysql;
@@ -45,9 +44,11 @@ async fn main() {
     let flink_cdc_path = args.flink_cdc().to_string();
 
     let registry = Arc::new(Mutex::new(Registry::default()));
+
+    let pipeline_registry = registry.clone();
     tokio::spawn(async move {
         let config = load_config(&flink_cdc_path);
-        pipeline::pipeline(&config, registry.clone()).await;
+        pipeline::pipeline(&config, pipeline_registry).await;
     });
 
     let registry_metrics = registry.clone();

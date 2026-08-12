@@ -9,7 +9,7 @@ use sqlx::Row;
 use tracing::info;
 use tracing::warn;
 
-use crate::binlog::Metrics;
+use crate::common::Metrics;
 use crate::common::CdcError;
 use crate::config::cdc::FlinkCdc;
 use crate::config::cdc::TableInclude;

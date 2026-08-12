@@ -1,20 +1,19 @@
 use std::{fmt::Display, sync::Arc};
 
 use chrono::{Local, TimeZone, offset::LocalResult};
-use prometheus_client::registry::Registry;
+use prometheus_client::{
+    encoding::EncodeLabelSet,
+    metrics::{counter::Counter, family::Family, gauge::Gauge},
+    registry::Registry,
+};
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::binlog::Metrics;
+pub mod schema;
 
 ///
-/// 目前这个mod下放置一些杂项，暂时不多，所以不做拆分，暂时放置如下的信息
-/// 1. 错误类型
-/// 2. 监控的lables这些
-
-///
-/// 定义自己项目模块的Error类型
+/// 目前这个 mod 下放置一些杂项：错误类型、监控指标/labels 等
 ///
 
 #[derive(Error, Debug)]
@@ -45,13 +44,73 @@ pub fn format_timestamp(timestamp: i64) -> String {
     }
 }
 
-///
-/// 放置监控等对应的信息的
-///
-
 pub async fn register_metrics(registry: Arc<Mutex<Registry>>) -> Metrics {
     let mut registry = registry.lock().await;
     let metrics = Metrics::default();
     metrics.register(&mut registry);
     return metrics;
+}
+
+///
+/// 有关监控的 labels 与指标定义
+///
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct EventLabel {
+    type_name: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct DescTableLabel {
+    db_name: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct KafkaLabel {
+    event: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct BinlogEventLabel {}
+
+/// 整个服务的所有指标都定义在这里
+#[derive(Debug)]
+pub struct Metrics {
+    flink_mysql_cdc: Family<EventLabel, Counter>,
+    flink_mysql_desc_table: Family<DescTableLabel, Counter>,
+    flink_sink_kafka_message: Family<KafkaLabel, Counter>,
+    flink_mysql_binlog_event_timestamp: Family<BinlogEventLabel, Gauge<i64>>,
+}
+
+impl Metrics {
+    pub fn default() -> Self {
+        Metrics {
+            flink_mysql_cdc: Family::default(),
+            flink_mysql_desc_table: Family::default(),
+            flink_sink_kafka_message: Family::default(),
+            flink_mysql_binlog_event_timestamp: Family::default(),
+        }
+    }
+
+    pub fn register(&self, registry: &mut Registry) {
+        registry.register("flink_mysql_cdc", "flink mysql cdc event count", self.flink_mysql_cdc.clone());
+        registry.register("flink_mysql_desc_table", "flink mysql desc table command total count", self.flink_mysql_desc_table.clone());
+        registry.register("flink_sink_kafka_message", "flink sink kafka message send count total", self.flink_sink_kafka_message.clone());
+        registry.register("flink_mysql_binlog_event_timestamp", "flink mysql binlog event timestamp", self.flink_mysql_binlog_event_timestamp.clone());
+    }
+
+    pub fn inc_flink_mysql_cdc(&self, type_name: &str) {
+        self.flink_mysql_cdc.get_or_create(&EventLabel { type_name: type_name.to_string() }).inc();
+    }
+
+    pub fn inc_flink_mysql_desc_table(&self, db_name: &str) {
+        self.flink_mysql_desc_table.get_or_create(&DescTableLabel { db_name: db_name.to_string() }).inc();
+    }
+
+    pub fn inc_flink_sink_kafka_message(&self, event: &str, count: u64) {
+        self.flink_sink_kafka_message.get_or_create(&KafkaLabel { event: event.to_string() }).inc_by(count);
+    }
+
+    pub fn stat_binlog_event_timestamp(&self, timestamp: u32) {
+        self.flink_mysql_binlog_event_timestamp.get_or_create(&BinlogEventLabel {}).set(timestamp as i64);
+    }
 }

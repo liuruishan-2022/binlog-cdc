@@ -22,7 +22,7 @@ use tokio::sync::{Mutex, mpsc::Sender};
 use tracing::{info, warn};
 
 use crate::{
-    binlog::Metrics,
+    common::Metrics,
     common::register_metrics,
     config::{
         CdcConfig,
