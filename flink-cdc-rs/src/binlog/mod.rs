@@ -1,36 +1,12 @@
-use std::sync::Arc;
-
 use mysql_binlog_connector_rust::event::event_data::EventData;
 use prometheus_client::{
     encoding::EncodeLabelSet,
     metrics::{counter::Counter, family::Family, gauge::Gauge},
     registry::Registry,
 };
-use tokio::sync::Mutex;
-use tracing::info;
 
-use crate::{binlog::dump::Dumper, common::CdcError, config::cdc::FlinkCdc};
-
-pub mod dump;
 pub mod event_channel;
-pub mod row;
 pub mod schema;
-
-///
-/// 新旧版本的速度对比,我们都是以相同的binlog的文件和数据内容做比对的
-/// 1. 旧版本的速度大概是:18分钟,然后一直耗费:1C,基本上是100%
-/// 2. 新版本的速度大概是:3分钟,然后CPU基本上是在: 130%左右,但是这个Receivers的消费者没有真正的处理消息内容
-///
-/// 总体看,是能够提升6倍的速度,也就是说,这个基本上是极限了,因为Sender端基本上是固定的了.单线程无法扩充了
-pub async fn start_dump(
-    registry: Arc<Mutex<Registry>>,
-    config: &FlinkCdc,
-) -> Result<i32, CdcError> {
-    info!("use channel pipeline hanle binlog cdc...");
-    let mut dumper = Dumper::new(config, registry).await?;
-    dumper.start(config).await?;
-    Ok(0)
-}
 
 ///
 /// 有关监控的一些配置信息

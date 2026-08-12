@@ -16,18 +16,23 @@ use mysql_binlog_connector_rust::{
         write_rows_event::WriteRowsEvent,
     },
 };
+use prometheus_client::registry::Registry;
 use serde_json::{Map, Number, Value, json};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{Mutex, mpsc::Sender};
 use tracing::{info, warn};
 
 use crate::{
+    binlog::Metrics,
+    common::register_metrics,
     config::{
         CdcConfig,
         source::{Mysql, Source},
     },
     mysql::schema::{TableMeta, TableSchema},
-    pipeline::formatter::{DebeziumFormat, MessageKey},
-    pipeline::message::PipelineRecord,
+    pipeline::{
+        formatter::{DebeziumFormat, MessageKey},
+        message::PipelineRecord,
+    },
     savepoint::{SavePoints, local::LocalFileSystem},
 };
 
@@ -47,10 +52,16 @@ pub struct MysqlDebezium<'a> {
     current_binlog: String,
     table_schema: TableSchema,
     table_meta_cache: HashMap<String, HashMap<u64, Arc<TableMeta>>>,
+    metrics: Arc<Metrics>,
 }
 
 impl<'a> MysqlDebezium<'a> {
-    pub async fn create(cdc: &'a CdcConfig, channels: Vec<Sender<PipelineRecord>>) -> Self {
+    pub async fn create(
+        cdc: &'a CdcConfig,
+        channels: Vec<Sender<PipelineRecord>>,
+        registry: Arc<Mutex<Registry>>,
+    ) -> Self {
+        let metrics = Arc::new(register_metrics(registry).await);
         let source = match cdc.source() {
             Source::Mysql(source) => source,
             _ => panic!("mysql source need mysql config"),
@@ -65,6 +76,7 @@ impl<'a> MysqlDebezium<'a> {
             current_binlog: String::new(),
             table_schema,
             table_meta_cache: HashMap::new(),
+            metrics: metrics,
         }
     }
 
@@ -78,24 +90,60 @@ impl<'a> MysqlDebezium<'a> {
         loop {
             match stream.read().await {
                 Ok((header, data)) => {
-                    info!("read mysql binlog event timestamp:{}", header.timestamp);
+                    self.metrics.stat_binlog_event_timestamp(header.timestamp);
                     match data {
                         EventData::Rotate(event) => {
                             info!("read new binlog:{}", event.binlog_filename);
                             self.current_binlog = event.binlog_filename.clone();
                             savepoint.save(&event.binlog_filename);
+                            self.metrics.inc_flink_mysql_cdc("rotate");
                         }
                         EventData::TableMap(event) => {
+                            self.metrics.inc_flink_mysql_cdc("table-map");
                             self.record_table_meta(event).await;
                         }
                         EventData::WriteRows(event) => {
+                            self.metrics.inc_flink_mysql_cdc("write-rows");
                             self.handle_write_rows(event).await;
                         }
                         EventData::UpdateRows(event) => {
+                            self.metrics.inc_flink_mysql_cdc("update-rows");
                             self.handle_update_rows(event).await;
                         }
                         EventData::DeleteRows(event) => {
+                            self.metrics.inc_flink_mysql_cdc("delete-rows");
                             self.handle_delete_rows(event).await;
+                        }
+
+                        EventData::NotSupported => {
+                            self.metrics.inc_flink_mysql_cdc("not-supported");
+                        }
+                        EventData::FormatDescription(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("format-description");
+                        }
+                        EventData::PreviousGtids(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("previous-gtids");
+                        }
+                        EventData::Gtid(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("gtid");
+                        }
+                        EventData::Query(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("query");
+                        }
+                        EventData::Xid(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("xid");
+                        }
+                        EventData::XaPrepare(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("xa-prepare");
+                        }
+                        EventData::TransactionPayload(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("transaction-payload");
+                        }
+                        EventData::RowsQuery(_event) => {
+                            self.metrics.inc_flink_mysql_cdc("rows-query");
+                        }
+                        EventData::HeartBeat => {
+                            self.metrics.inc_flink_mysql_cdc("heart-beat");
                         }
                         _ => {}
                     }

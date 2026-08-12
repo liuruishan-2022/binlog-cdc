@@ -1,8 +1,12 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
 
 use chrono::{Local, TimeZone, offset::LocalResult};
+use prometheus_client::registry::Registry;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tracing::warn;
+
+use crate::binlog::Metrics;
 
 ///
 /// 定义自己项目模块的Error类型
@@ -34,4 +38,15 @@ pub fn format_timestamp(timestamp: i64) -> String {
             "".to_string()
         }
     }
+}
+
+///
+/// 放置监控等对应的信息的
+///
+
+pub async fn register_metrics(registry: Arc<Mutex<Registry>>) -> Metrics {
+    let mut registry = registry.lock().await;
+    let metrics = Metrics::default();
+    metrics.register(&mut registry);
+    return metrics;
 }
