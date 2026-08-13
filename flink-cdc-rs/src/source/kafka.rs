@@ -33,12 +33,8 @@ where
     const GROUP_ID: &'static str = "group.id";
     const AUTO_OFFSET_RESET: &'static str = "auto.offset.reset";
     const EARLIEST: &'static str = "earliest";
-    const MESSAGE_TIMEOUT_MS: &'static str = "message.timeout.ms";
     const SESSION_TIMEOUT_MS: &'static str = "session.timeout.ms";
-    const BATCH_SIZE: &'static str = "batch.size";
-    const COMPRESSION_TYPE: &'static str = "compression.type";
     const HEARTBEAT_INTERVAL_MS: &'static str = "heartbeat.interval.ms";
-    const LINKGER_MS: &'static str = "linger.ms";
     pub fn new(sink: T, source_config: &'a KafkaConfig, cdc_config: &'a CdcConfig) -> Self {
         Kafka {
             sink,

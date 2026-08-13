@@ -15,7 +15,6 @@ use rskafka::{
     client::{
         Client, ClientBuilder,
         partition::{Compression, PartitionClient},
-        producer::{BatchProducer, BatchProducerBuilder, aggregator::RecordAggregator},
     },
     record::Record,
 };
@@ -191,7 +190,6 @@ impl SinkStream for SpmcKafkaSink {
 
 #[derive(Clone)]
 struct PartitionProducer {
-    batch_producer: Arc<BatchProducer<RecordAggregator>>,
     partition_client: Arc<PartitionClient>,
     compression: Compression,
 }
@@ -213,8 +211,6 @@ impl RskafkaSink {
         let producers = RskafkaSink::load_metadata(
             &client,
             config.sink_topic(),
-            config.sink_linger_ms(),
-            config.sink_batch_size(),
             config.sink_compression_type(),
         )
         .await;
@@ -237,8 +233,6 @@ impl RskafkaSink {
         let producers = RskafkaSink::load_metadata(
             &client,
             config.topic(),
-            config.linger_ms(),
-            config.batch_size(),
             config.compression_type(),
         )
         .await;
@@ -253,8 +247,6 @@ impl RskafkaSink {
     async fn load_metadata(
         client: &Client,
         topic: &str,
-        linger_ms: u32,
-        batch_size: u32,
         compression_type: &str,
     ) -> PartitionProducers {
         let topics = client
@@ -279,14 +271,9 @@ impl RskafkaSink {
                 .expect("failed to load partition metadata...");
 
             let partition_client = Arc::new(partition_client);
-            let batch_producer = BatchProducerBuilder::new(partition_client.clone())
-                .with_compression(compression)
-                .with_linger(Duration::from_millis(linger_ms as u64))
-                .build(RecordAggregator::new(batch_size as usize));
             producers.insert(
                 *partition,
                 PartitionProducer {
-                    batch_producer: Arc::new(batch_producer),
                     partition_client,
                     compression,
                 },
@@ -372,27 +359,6 @@ impl RskafkaSink {
                 warn!("not right pipeline record type");
                 None
             }
-        }
-    }
-
-    async fn produce_record(&self, partition: i32, record: Record) {
-        if let Some(producer) = self.partition_producers.get(&partition) {
-            match producer.batch_producer.produce(record).await {
-                Ok(offset) => {
-                    info!(
-                        "send message to kafka success offset:{} partition:{}",
-                        offset, partition
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        "failed to produce message to kafka partition:{}, error:{:?}",
-                        partition, err
-                    );
-                }
-            }
-        } else {
-            warn!("partition producer not found, partition:{}", partition);
         }
     }
 
