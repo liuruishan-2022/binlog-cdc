@@ -114,3 +114,52 @@ impl Metrics {
         self.flink_mysql_binlog_event_timestamp.get_or_create(&BinlogEventLabel {}).set(timestamp as i64);
     }
 }
+
+
+///
+/// channel 深度/占用率指标: 判别 source 与 sink 谁是瓶颈的关键数据
+/// 深度持续=容量 → sink 消费不动; 深度持续≈0 → source 供不上
+///
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct ChannelLabel {
+    index: i64,
+}
+
+pub struct ChannelMetrics {
+    flink_channel_depth: Family<ChannelLabel, Gauge>,
+    flink_channel_usage_percent: Family<ChannelLabel, Gauge>,
+}
+
+impl ChannelMetrics {
+    pub fn register(registry: &mut Registry) -> Self {
+        let depth = Family::default();
+        let usage = Family::default();
+        registry.register(
+            "flink_channel_depth",
+            "channel 当前队列深度(消息数)",
+            depth.clone(),
+        );
+        registry.register(
+            "flink_channel_usage_percent",
+            "channel 占用率百分比(0-100)",
+            usage.clone(),
+        );
+        Self {
+            flink_channel_depth: depth,
+            flink_channel_usage_percent: usage,
+        }
+    }
+
+    pub fn set(&self, index: usize, depth: usize, capacity: usize) {
+        let label = ChannelLabel { index: index as i64 };
+        self.flink_channel_depth.get_or_create(&label).set(depth as i64);
+        let usage = if capacity > 0 {
+            (depth as f64 / capacity as f64 * 100.0) as i64
+        } else {
+            0
+        };
+        self.flink_channel_usage_percent
+            .get_or_create(&label)
+            .set(usage);
+    }
+}

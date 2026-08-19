@@ -1,5 +1,8 @@
 use std::sync::Arc;
 
+use std::time::Duration;
+
+use crate::common::ChannelMetrics;
 use crate::config::CdcConfig;
 use crate::config::{sink::Sink, source::Source};
 use crate::pipeline::message::PipelineRecord;
@@ -35,6 +38,7 @@ pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
         (Source::Mysql(_), Sink::Kafka(kafka)) => {
             tracing::info!("mysql--->kafka");
             let (senders, receivers) = channels(cdc);
+            spawn_channel_sampler(registry.clone(), senders.clone()).await;
             let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
             let sink_handles = sink.start();
 
@@ -62,6 +66,29 @@ pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
         }
         _ => panic!("unsupported pipeline source/sink combination"),
     }
+}
+
+/// 周期采样各 channel 深度/占用率, 暴露到 /metrics
+async fn spawn_channel_sampler(
+    registry: Arc<Mutex<Registry>>,
+    senders: Vec<Sender<PipelineRecord>>,
+) {
+    let metrics = {
+        let mut r = registry.lock().await;
+        ChannelMetrics::register(&mut r)
+    };
+    let caps: Vec<usize> = senders.iter().map(|s| s.max_capacity()).collect();
+    tokio::spawn(async move {
+        tracing::info!("channel metrics sampler started, channels={}", senders.len());
+        loop {
+            for (i, s) in senders.iter().enumerate() {
+                // tokio mpsc 的 len() 只在 Receiver 上; Sender 侧用 总容量-剩余容量 反推深度
+                let depth = s.max_capacity() - s.capacity();
+                metrics.set(i, depth, caps[i]);
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    });
 }
 
 fn channels(cdc: &CdcConfig) -> (Vec<Sender<PipelineRecord>>, Vec<Receiver<PipelineRecord>>) {
