@@ -1,8 +1,20 @@
 source:
-  type: mysqldump
-  name: mysqldump_source
-  filepath: /home/liuxu/Documents/press/test
-
+  type: mysql
+  name: mysql-console-source
+  hostname: 127.0.0.1
+  port: 3306
+  username: liuxu
+  password: liuxu@110
+  tables: cdc_e2e.t1
+  server-time-zone: Asia/Shanghai
+  server-id: "99"
+  scan.startup.mode: specific-offset
+  scan.startup.specific-offset.file: binlog.000730
+  scan.startup.specific-offset.pos: 4
 sink:
   type: console
   name: Console
+pipeline:
+  name: mysql binlog to console
+  parallelism: 1
+  capacity: 1000
