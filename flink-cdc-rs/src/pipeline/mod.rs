@@ -6,6 +6,7 @@ use crate::common::ChannelMetrics;
 use crate::config::CdcConfig;
 use crate::config::{sink::Sink, source::Source};
 use crate::pipeline::message::PipelineRecord;
+use crate::sink::console::ConsoleSink;
 use crate::sink::kafka::RskafkaSink;
 use crate::sink::mysql::MysqlSink;
 use crate::source::kafka::Kafka as KafkaSource;
@@ -50,6 +51,20 @@ pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
                 handle.await.expect("kafka sink task failed");
             }
         }
+        (Source::Mysql(_), Sink::Console(_)) => {
+            tracing::info!("mysql--->console");
+            let (senders, receivers) = channels(cdc);
+            let sink = ConsoleSink::create(receivers);
+            let sink_handles = sink.start();
+
+            let mut source = MysqlBinlogEvent::create(cdc, senders, registry).await;
+            source.read().await;
+            drop(source);
+
+            for handle in sink_handles {
+                handle.await.expect("console sink task failed");
+            }
+        }
         (Source::Rocketmq(_), Sink::Kafka(kafka)) => {
             tracing::info!("rocketmq--->kafka");
             let (senders, receivers) = channels(cdc);
@@ -79,7 +94,10 @@ async fn spawn_channel_sampler(
     };
     let caps: Vec<usize> = senders.iter().map(|s| s.max_capacity()).collect();
     tokio::spawn(async move {
-        tracing::info!("channel metrics sampler started, channels={}", senders.len());
+        tracing::info!(
+            "channel metrics sampler started, channels={}",
+            senders.len()
+        );
         loop {
             for (i, s) in senders.iter().enumerate() {
                 // tokio mpsc 的 len() 只在 Receiver 上; Sender 侧用 总容量-剩余容量 反推深度
