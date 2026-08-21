@@ -1,14 +1,15 @@
 use std::{fmt::Display, sync::Arc};
 
 use base64::{Engine, engine::general_purpose};
+use chrono::Utc;
 use mysql_binlog_connector_rust::column::column_value::ColumnValue;
 use mysql_binlog_connector_rust::event::delete_rows_event::DeleteRowsEvent;
 use mysql_binlog_connector_rust::event::event_data::EventData;
 use mysql_binlog_connector_rust::event::row_event::RowEvent;
 use mysql_binlog_connector_rust::event::update_rows_event::UpdateRowsEvent;
 use mysql_binlog_connector_rust::event::write_rows_event::WriteRowsEvent;
-use serde_json::Number;
 use serde_json::{Map, Value};
+use serde_json::{Number, json};
 
 use crate::common;
 use crate::pipeline::formatter::{DebeziumFormat, MessageKey};
@@ -27,6 +28,7 @@ pub enum PipelineRecord {
     KafkaDebezium(KafkaDebezium),
     Mysqldump(Mysqldump),
     MysqlBinlogFile(MysqlBinlogFile),
+    ConsoleData(ConsoleData),
 }
 
 impl PipelineRecord {
@@ -65,6 +67,7 @@ impl Display for PipelineRecord {
             PipelineRecord::KafkaDebezium(data) => write!(f, "kafka debezium:{}", data),
             PipelineRecord::Mysqldump(data) => write!(f, "mysqldump:{}", data),
             PipelineRecord::MysqlBinlogFile(data) => write!(f, "mysql binlog file:{}", data),
+            PipelineRecord::ConsoleData(data) => write!(f, "console data:{}", data),
         }
     }
 }
@@ -394,5 +397,32 @@ impl Display for Mysqldump {
             "data:{} file:{} talbe:{}",
             self.data, self.file, self.table
         )
+    }
+}
+
+///
+/// 给一个console的消息类型
+///
+
+#[derive(Serialize, Deserialize)]
+pub struct ConsoleData(DebeziumFormat);
+
+impl ConsoleData {
+    pub fn default() -> Self {
+        let mut after = Map::new();
+        after.insert("id".to_string(), json!(Utc::now().timestamp_micros()));
+
+        let mut keys = Map::new();
+        keys.insert("keys".to_string(), json!(Utc::now().timestamp_micros()));
+        let message_key = MessageKey::new(keys);
+
+        let data = DebeziumFormat::insert(json!(after), "db_test", "test_info", message_key);
+        ConsoleData(data)
+    }
+}
+
+impl Display for ConsoleData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

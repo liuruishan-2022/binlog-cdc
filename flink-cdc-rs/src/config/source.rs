@@ -17,6 +17,8 @@ pub enum Source {
     MysqlDump(Mysqldump),
     #[serde(rename = "rocketmq")]
     Rocketmq(Rocketmq),
+    #[serde(rename = "console")]
+    Console(Console),
 }
 
 ///
@@ -208,6 +210,17 @@ impl Rocketmq {
 
     pub fn consume_thread_max(&self) -> Option<u32> {
         self.consume_thread_max
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Console {
+    name: String,
+}
+
+impl Console {
+    pub fn name(&self) -> &str {
+        self.name.as_str()
     }
 }
 

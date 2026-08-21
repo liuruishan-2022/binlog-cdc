@@ -196,6 +196,9 @@ struct PartitionProducer {
 
 type PartitionProducers = HashMap<i32, PartitionProducer>;
 
+///
+/// 基本上可以推断出来,性能问题存在与RskafkaSink这端
+///
 pub struct RskafkaSink {
     partition_producers: PartitionProducers,
     topic: String,
@@ -230,12 +233,8 @@ impl RskafkaSink {
             .build()
             .await
             .expect("create rskafka client error...");
-        let producers = RskafkaSink::load_metadata(
-            &client,
-            config.topic(),
-            config.compression_type(),
-        )
-        .await;
+        let producers =
+            RskafkaSink::load_metadata(&client, config.topic(), config.compression_type()).await;
 
         RskafkaSink {
             partition_producers: producers,
@@ -318,11 +317,6 @@ impl RskafkaSink {
     }
 
     async fn send_message(&self, message: PipelineRecord) {
-        if self.partition_producers.is_empty() {
-            warn!("rskafka sink has no partition producer");
-            return;
-        }
-
         if let Some((partition, records)) = self.message_records(message) {
             self.produce_records(partition, records).await;
         }
