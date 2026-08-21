@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use crate::common::ChannelMetrics;
 use crate::config::CdcConfig;
-use crate::config::source::Console;
 use crate::config::{sink::Sink, source::Source};
 use crate::pipeline::message::PipelineRecord;
 use crate::sink::console::ConsoleSink;
@@ -15,11 +14,9 @@ use crate::source::kafka::Kafka as KafkaSource;
 use crate::source::mysql::MysqlBinlogEvent;
 use crate::source::rocketmq::RocketMQSource;
 use prometheus_client::registry::Registry;
-use sqlparser::ast::RefreshModeKind;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
-use tracing::Instrument;
 
 pub mod formatter;
 /// 主要是放置数据处理的Pipeline的逻辑
