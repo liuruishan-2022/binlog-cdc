@@ -419,6 +419,10 @@ impl ConsoleData {
         let data = DebeziumFormat::insert(json!(after), "db_test", "test_info", message_key);
         ConsoleData(data)
     }
+
+    pub fn inot_data(self) -> DebeziumFormat {
+        self.0
+    }
 }
 
 impl Display for ConsoleData {

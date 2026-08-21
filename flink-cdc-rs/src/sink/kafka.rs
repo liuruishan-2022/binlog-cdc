@@ -349,6 +349,12 @@ impl RskafkaSink {
                     }
                 }
             }
+            PipelineRecord::ConsoleData(data) => {
+                let data = data.inot_data();
+                let partition = self.partition(&data.keys());
+                let record = Record::from(data);
+                Some((partition, vec![record]))
+            }
             _ => {
                 warn!("not right pipeline record type");
                 None
