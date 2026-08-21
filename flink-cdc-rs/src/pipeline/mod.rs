@@ -41,7 +41,7 @@ pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
             tracing::info!("mysql--->kafka");
             let (senders, receivers) = channels(cdc);
             spawn_channel_sampler(registry.clone(), senders.clone()).await;
-            let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
+            let sink = RskafkaSink::create_with_channels(kafka, receivers, registry.clone()).await;
             let sink_handles = sink.start();
 
             let mut source = MysqlBinlogEvent::create(cdc, senders, registry).await;
@@ -69,7 +69,7 @@ pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
         (Source::Rocketmq(_), Sink::Kafka(kafka)) => {
             tracing::info!("rocketmq--->kafka");
             let (senders, receivers) = channels(cdc);
-            let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
+            let sink = RskafkaSink::create_with_channels(kafka, receivers, registry.clone()).await;
             let sink_handles = sink.start();
 
             let mut source = RocketMQSource::create(cdc, senders);
@@ -83,7 +83,7 @@ pub async fn pipeline(cdc: &CdcConfig, registry: Arc<Mutex<Registry>>) {
         (Source::Console(_), Sink::Kafka(kafka)) => {
             tracing::info!("console--->kafka");
             let (senders, receivers) = channels(cdc);
-            let sink = RskafkaSink::create_with_channels(kafka, receivers).await;
+            let sink = RskafkaSink::create_with_channels(kafka, receivers, registry.clone()).await;
             let sink_handles = sink.start();
 
             let source = ConsoleSource::create(senders);

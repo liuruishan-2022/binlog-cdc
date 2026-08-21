@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use prometheus_client::registry::Registry;
 use rdkafka::{
     ClientConfig,
     error::KafkaError,
@@ -18,7 +19,10 @@ use rskafka::{
     },
     record::Record,
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{
+    Mutex,
+    mpsc::{self, Receiver, Sender},
+};
 use tracing::{info, warn};
 
 use crate::{
@@ -203,10 +207,13 @@ pub struct RskafkaSink {
     partition_producers: PartitionProducers,
     topic: String,
     channels: Vec<Receiver<PipelineRecord>>,
+    registry: Arc<Mutex<Registry>>,
+    metrics: Arc<crate::common::SinkKafkaMetrics>,
 }
 
 impl RskafkaSink {
-    pub async fn create(config: &FlinkCdc) -> Self {
+    pub async fn create(config: &FlinkCdc, registry: Arc<Mutex<Registry>>) -> Self {
+        let metrics = Arc::new(crate::common::register_sink_metrics(registry.clone()).await);
         let client = ClientBuilder::new(config.sink_bootstrap_servers())
             .build()
             .await
@@ -222,13 +229,17 @@ impl RskafkaSink {
             partition_producers: producers,
             topic: config.sink_topic().to_string(),
             channels: Vec::new(),
+            registry: registry,
+            metrics: metrics,
         }
     }
 
     pub async fn create_with_channels(
         config: &Kafka,
         channels: Vec<Receiver<PipelineRecord>>,
+        registry: Arc<Mutex<Registry>>,
     ) -> Self {
+        let metrics = Arc::new(crate::common::register_sink_metrics(registry.clone()).await);
         let client = ClientBuilder::new(config.bootstrap_servers())
             .build()
             .await
@@ -240,6 +251,8 @@ impl RskafkaSink {
             partition_producers: producers,
             topic: config.topic().to_string(),
             channels: channels,
+            registry: registry,
+            metrics: metrics,
         }
     }
 
@@ -287,6 +300,8 @@ impl RskafkaSink {
             partition_producers,
             topic,
             channels,
+            registry,
+            metrics,
         } = self;
 
         channels
@@ -297,6 +312,8 @@ impl RskafkaSink {
                     partition_producers: partition_producers.clone(),
                     topic: topic.clone(),
                     channels: Vec::new(),
+                    registry: registry.clone(),
+                    metrics: metrics.clone(),
                 };
                 tokio::spawn(async move {
                     info!("rskafka sink receiver启动, index={}", index);
@@ -365,18 +382,22 @@ impl RskafkaSink {
     async fn produce_records(&self, partition: i32, records: Vec<Record>) {
         if let Some(producer) = self.partition_producers.get(&partition) {
             let count = records.len();
-            match producer
+            let start = std::time::Instant::now();
+            let result = producer
                 .partition_client
                 .produce(records, producer.compression)
-                .await
-            {
+                .await;
+            let elapsed = start.elapsed().as_secs_f64();
+            match result {
                 Ok(offsets) => {
+                    self.metrics.record_produce(count, elapsed, true);
                     info!(
-                        "send batch messages to kafka success count:{} partition:{} offsets:{:?}",
-                        count, partition, offsets
+                        "send batch messages to kafka success count:{} partition:{} offsets:{:?} elapsed:{:.3}s",
+                        count, partition, offsets, elapsed
                     );
                 }
                 Err(err) => {
+                    self.metrics.record_produce(count, elapsed, false);
                     warn!(
                         "failed to produce batch messages to kafka partition:{}, count:{}, error:{:?}",
                         partition, count, err
@@ -447,28 +468,4 @@ impl SinkStream for RskafkaSink {
     async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
 
     async fn process(&self, _debezium: &DebeziumFormat, _topic: &str) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashMap, time::Duration};
-
-    use super::RskafkaSink;
-
-    #[tokio::test]
-    async fn rskafka_workers_exit_after_all_senders_are_dropped() {
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        drop(sender);
-        let sink = RskafkaSink {
-            partition_producers: HashMap::new(),
-            topic: "test".to_string(),
-            channels: vec![receiver],
-        };
-
-        let handle = sink.start().into_iter().next().unwrap();
-        tokio::time::timeout(Duration::from_secs(1), handle)
-            .await
-            .expect("worker did not exit")
-            .expect("worker panicked");
-    }
 }

@@ -3,7 +3,7 @@ use std::{fmt::Display, sync::Arc};
 use chrono::{Local, TimeZone, offset::LocalResult};
 use prometheus_client::{
     encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family, gauge::Gauge},
+    metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
     registry::Registry,
 };
 use thiserror::Error;
@@ -162,4 +162,66 @@ impl ChannelMetrics {
             .get_or_create(&label)
             .set(usage);
     }
+}
+
+
+///
+/// sink 发送 kafka 的指标: 条数(成败)/批次大小/produce 耗时
+/// produce 耗时可量化每次请求等待 broker ack 的 RTT 成本
+///
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct SinkResultLabel {
+    result: String,
+}
+
+pub struct SinkKafkaMetrics {
+    flink_sink_kafka_message_total: Family<SinkResultLabel, Counter>,
+    flink_sink_kafka_batch_size: Histogram,
+    flink_sink_kafka_produce_duration_seconds: Histogram,
+}
+
+impl SinkKafkaMetrics {
+    pub fn register(registry: &mut Registry) -> Self {
+        let message_total = Family::default();
+        let batch_size = Histogram::new(vec![1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0, 5000.0]);
+        let duration = Histogram::new(vec![
+            0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+        ]);
+        registry.register(
+            "flink_sink_kafka_message_total",
+            "sink 发送到 kafka 的消息条数(按成功/失败)",
+            message_total.clone(),
+        );
+        registry.register(
+            "flink_sink_kafka_batch_size",
+            "sink 每次 produce 的批次条数",
+            batch_size.clone(),
+        );
+        registry.register(
+            "flink_sink_kafka_produce_duration_seconds",
+            "sink 单次 produce 耗时(含等待 broker ack)",
+            duration.clone(),
+        );
+        Self {
+            flink_sink_kafka_message_total: message_total,
+            flink_sink_kafka_batch_size: batch_size,
+            flink_sink_kafka_produce_duration_seconds: duration,
+        }
+    }
+
+    pub fn record_produce(&self, count: usize, duration_secs: f64, success: bool) {
+        let result = if success { "success" } else { "error" }.to_string();
+        self.flink_sink_kafka_message_total
+            .get_or_create(&SinkResultLabel { result })
+            .inc_by(count as u64);
+        self.flink_sink_kafka_batch_size.observe(count as f64);
+        self.flink_sink_kafka_produce_duration_seconds
+            .observe(duration_secs);
+    }
+}
+
+/// 参考 source 侧 register_metrics 的写法: 从 registry 构建 sink 指标
+pub async fn register_sink_metrics(registry: Arc<Mutex<Registry>>) -> SinkKafkaMetrics {
+    let mut registry = registry.lock().await;
+    SinkKafkaMetrics::register(&mut registry)
 }
