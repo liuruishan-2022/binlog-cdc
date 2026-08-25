@@ -317,9 +317,17 @@ impl RskafkaSink {
                 };
                 tokio::spawn(async move {
                     info!("rskafka sink receiver启动, index={}", index);
-                    while let Some(message) = receiver.recv().await {
-                        sink.send_message(message).await;
+                    loop {
+                        let mut buffer: Vec<PipelineRecord> = Vec::with_capacity(20);
+                        let count = receiver.recv_many(&mut buffer, 20 as usize).await;
+                        if count == 0 {
+                            break;
+                        }
+                        sink.send_batch_messages(buffer).await;
                     }
+                    //while let Some(message) = receiver.recv().await {
+                    //    sink.send_message(message).await;
+                    //}
                     info!("rskafka sink receiver退出, index={}", index);
                 })
             })
@@ -333,10 +341,24 @@ impl RskafkaSink {
         }
     }
 
-    async fn send_message(&self, message: PipelineRecord) {
-        if let Some((partition, records)) = self.message_records(message) {
-            self.produce_records(partition, records).await;
-        }
+    async fn send_batch_messages(&self, messages: Vec<PipelineRecord>) {
+        let partition_records = messages
+            .into_iter()
+            .filter_map(|message| self.message_records(message))
+            .fold(
+                HashMap::<i32, Vec<Record>>::new(),
+                |mut partitions, (partition, records)| {
+                    partitions.entry(partition).or_default().extend(records);
+                    partitions
+                },
+            );
+
+        futures_util::future::join_all(
+            partition_records
+                .into_iter()
+                .map(|(partition, records)| self.produce_records(partition, records)),
+        )
+        .await;
     }
 
     fn message_records(&self, message: PipelineRecord) -> Option<(i32, Vec<Record>)> {
