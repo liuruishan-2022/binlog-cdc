@@ -317,9 +317,10 @@ impl RskafkaSink {
                 };
                 tokio::spawn(async move {
                     info!("rskafka sink receiver启动, index={}", index);
+                    let size: usize = 200;
                     loop {
-                        let mut buffer: Vec<PipelineRecord> = Vec::with_capacity(20);
-                        let count = receiver.recv_many(&mut buffer, 20 as usize).await;
+                        let mut buffer: Vec<PipelineRecord> = Vec::with_capacity(size);
+                        let count = receiver.recv_many(&mut buffer, size).await;
                         if count == 0 {
                             break;
                         }
