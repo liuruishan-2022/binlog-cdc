@@ -317,6 +317,7 @@ impl RskafkaSink {
                 };
                 tokio::spawn(async move {
                     info!("rskafka sink receiver启动, index={}", index);
+                    //修改成下面的模式之后,我们发现tps能到:10w/s的速度
                     let size: usize = 200;
                     loop {
                         let mut buffer: Vec<PipelineRecord> = Vec::with_capacity(size);
@@ -326,9 +327,6 @@ impl RskafkaSink {
                         }
                         sink.send_batch_messages(buffer).await;
                     }
-                    //while let Some(message) = receiver.recv().await {
-                    //    sink.send_message(message).await;
-                    //}
                     info!("rskafka sink receiver退出, index={}", index);
                 })
             })
