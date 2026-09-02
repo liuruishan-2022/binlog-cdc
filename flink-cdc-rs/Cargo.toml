@@ -43,6 +43,7 @@ zip = { version = "7.0.0", default-features = false, features = [
     "bzip2",
     "zstd",
 ] }
+globwalk = "0.9.1"
 
 [profile.dev]
 opt-level = 0

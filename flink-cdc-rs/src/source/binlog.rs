@@ -21,3 +21,27 @@ impl<'a> MysqlBinlogFile<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::LocalTimer;
+
+    fn init_log() {
+        tracing_subscriber::fmt()
+            .with_timer(LocalTimer)
+            .with_line_number(true)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .init();
+    }
+
+    #[test]
+    fn test_glob_walker() {
+        init_log();
+        for ele in globwalk::glob("/home/liuxu/Pictures/**/*.png").unwrap() {
+            if let Ok(ele) = ele {
+                tracing::info!("{:?}", ele.path());
+            }
+        }
+    }
+}

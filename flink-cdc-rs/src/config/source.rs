@@ -224,6 +224,34 @@ impl Console {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct BinlogFile {
+    name: String,
+    path: String,
+    hostname: String,
+    port: u32,
+    username: String,
+    password: String,
+}
+
+impl BinlogFile {
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub fn password(&self) -> &str {
+        &self.password
+    }
+
+    pub fn url(&self) -> String {
+        let uri = format!("mysql://{}:{}", self.hostname, self.port);
+        let mut uri = url::Url::parse(&uri).unwrap();
+        let _ = uri.set_username(self.username());
+        let _ = uri.set_password(Some(self.password()));
+        uri.as_str().to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::source::{Kafka, Source};
