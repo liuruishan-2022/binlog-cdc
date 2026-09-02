@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use source_sink::common::DebeziumFormat;
+use crate::debezium::DebeziumFormat;
 use tokio::{
     fs::{File, OpenOptions},
     io::AsyncWriteExt,

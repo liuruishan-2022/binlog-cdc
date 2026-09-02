@@ -1,5 +1,5 @@
 [workspace]
-members = ["binlog-file-rs", "flink-cdc-rs", "source-sink", "flink-cdc-init", "dump-sql-cdc"]
+members = ["binlog-file-rs", "flink-cdc-rs", "flink-cdc-init", "dump-sql-cdc"]
 
 [workspace.dependencies]
 clap = { version = "4.5.54", features = ["derive"] }

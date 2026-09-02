@@ -13,7 +13,6 @@ rskafka = "0.6.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["preserve_order"] }
 serde_yaml = "0.9.34"
-source-sink = { path = "../source-sink" }
 sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio", "tls-native-tls"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }

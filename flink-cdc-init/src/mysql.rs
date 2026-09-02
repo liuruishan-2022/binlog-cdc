@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures_util::TryStreamExt;
 use serde_json::{Map, Value};
-use source_sink::common::{DebeziumFormat, MessageKey};
+use crate::debezium::{DebeziumFormat, MessageKey};
 use sqlx::{MySqlPool, Row, mysql::MySqlPoolOptions};
 use tracing::{info, warn};
 

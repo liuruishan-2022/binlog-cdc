@@ -8,6 +8,7 @@ use crate::{args::Args, config::FlinkCdcInit, error::Result};
 
 mod args;
 mod config;
+mod debezium;
 mod error;
 mod init;
 mod kafka;

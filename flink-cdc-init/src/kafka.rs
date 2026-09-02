@@ -21,7 +21,7 @@ use rskafka::{
     },
     record::Record,
 };
-use source_sink::common::DebeziumFormat;
+use crate::debezium::DebeziumFormat;
 use tracing::{info, warn};
 
 use crate::{

@@ -1,3 +1,4 @@
+pub mod binlog;
 pub mod console;
 pub mod kafka;
 pub mod mysql;
