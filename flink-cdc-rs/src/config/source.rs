@@ -19,6 +19,8 @@ pub enum Source {
     Rocketmq(Rocketmq),
     #[serde(rename = "console")]
     Console(Console),
+    #[serde(rename = "binlog")]
+    BinlogFile(BinlogFile),
 }
 
 ///
@@ -241,6 +243,10 @@ impl BinlogFile {
 
     pub fn password(&self) -> &str {
         &self.password
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     pub fn url(&self) -> String {
