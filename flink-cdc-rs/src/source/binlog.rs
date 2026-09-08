@@ -3,6 +3,7 @@ use std::{
     fs::File,
     hash::{DefaultHasher, Hash, Hasher},
     io::{self, ErrorKind, Seek},
+    path::Path,
     sync::Arc,
 };
 
@@ -59,12 +60,26 @@ impl<'a> MysqlBinlogFile<'a> {
         }
     }
 
-    pub async fn read(&self) {
+    pub async fn read(&mut self) {
         match globwalk::glob(self.binlog_file.path()) {
             Ok(walker) => {
                 for file in walker {
                     if let Ok(ele) = file {
-                        let _file = File::open(ele.path());
+                        match self.parse_binlog(&ele.path()).await {
+                            Ok(_) => {
+                                info!(
+                                    "parse binlog file:{} success!",
+                                    ele.path().to_str().unwrap_or("")
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "parse binlog file:{} failed err:{}!",
+                                    ele.path().to_str().unwrap_or(""),
+                                    err
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -74,7 +89,7 @@ impl<'a> MysqlBinlogFile<'a> {
         }
     }
 
-    async fn parse_binlog(&mut self, file: &str) -> Result<(), io::Error> {
+    async fn parse_binlog(&mut self, file: &Path) -> Result<(), io::Error> {
         let mut file = File::open(file)?;
 
         let mut parser = BinlogParser {
