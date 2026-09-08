@@ -570,10 +570,10 @@ impl<'a> MysqlBinlogEvent<'a> {
     }
 }
 
-struct MysqlRowEventHandler;
+pub struct MysqlRowEventHandler;
 
 impl MysqlRowEventHandler {
-    fn parse_write_rows(table_meta: &TableMeta, event: WriteRowsEvent) -> Vec<DebeziumFormat> {
+    pub fn parse_write_rows(table_meta: &TableMeta, event: WriteRowsEvent) -> Vec<DebeziumFormat> {
         event
             .rows
             .into_iter()
@@ -643,7 +643,7 @@ impl MysqlRowEventHandler {
         MessageKey::new(key)
     }
 
-    fn convert_and_parse_row(table_meta: &TableMeta, row: RowEvent) -> Map<String, Value> {
+    pub fn convert_and_parse_row(table_meta: &TableMeta, row: RowEvent) -> Map<String, Value> {
         let mut position: usize = 1;
         let mut row_map = Map::with_capacity(row.column_values.len());
         row.column_values.into_iter().for_each(|column_value| {
@@ -658,7 +658,7 @@ impl MysqlRowEventHandler {
         row_map
     }
 
-    fn convert_column_value_to_json(column_value: &ColumnValue) -> Value {
+    pub fn convert_column_value_to_json(column_value: &ColumnValue) -> Value {
         match column_value {
             ColumnValue::Tiny(data) => Value::Number(Number::from(*data)),
             ColumnValue::Short(data) => Value::Number(Number::from(*data)),

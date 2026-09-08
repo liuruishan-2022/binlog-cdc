@@ -1,19 +1,28 @@
 use std::{
     collections::HashMap,
     fs::File,
+    hash::{DefaultHasher, Hash, Hasher},
     io::{self, ErrorKind, Seek},
     sync::Arc,
 };
 
 use mysql_binlog_connector_rust::{
-    binlog_error::BinlogError, binlog_parser::BinlogParser, event::{event_data::EventData, table_map_event::TableMapEvent},
+    binlog_error::BinlogError,
+    binlog_parser::BinlogParser,
+    event::{
+        delete_rows_event::DeleteRowsEvent, event_data::EventData, row_event::RowEvent,
+        table_map_event::TableMapEvent, update_rows_event::UpdateRowsEvent,
+        write_rows_event::WriteRowsEvent,
+    },
 };
 use tokio::sync::mpsc::Sender;
+use tracing::{info, warn};
 
 use crate::{
     config::{CdcConfig, source::BinlogFile},
     mysql::schema::{TableMeta, TableSchema},
     pipeline::message::PipelineRecord,
+    source::mysql::MysqlRowEventHandler,
 };
 
 ///
@@ -22,7 +31,7 @@ use crate::{
 /// 不过我们还是需要区分mysql binlog/pg binlog/oracle binlog等等
 ///
 
-type TableMetaCache = HashMap<String, HashMap<u64, Arc<TableMeta>>>;
+type TableMetaCache = HashMap<u64, Arc<TableMeta>>;
 
 pub struct MysqlBinlogFile<'a> {
     config: &'a CdcConfig,
@@ -65,7 +74,7 @@ impl<'a> MysqlBinlogFile<'a> {
         }
     }
 
-    async fn parse_binlog(file: &str) -> Result<(), io::Error> {
+    async fn parse_binlog(&mut self, file: &str) -> Result<(), io::Error> {
         let mut file = File::open(file)?;
 
         let mut parser = BinlogParser {
@@ -81,11 +90,66 @@ impl<'a> MysqlBinlogFile<'a> {
                     Ok((header, data)) => {
                         match data {
                             EventData::TableMap(event) => {
-                                //todo
+                                self.record_table_meta(event);
                             }
-                            EventData::WriteRows(event) => {}
-                            EventData::UpdateRows(event) => {}
-                            EventData::DeleteRows(event) => {}
+                            EventData::WriteRows(event) => {
+                                if let Some(table_meta) = self.table_meta_cache.get(&event.table_id)
+                                {
+                                    for row in event.rows {
+                                        let key = Self::row_partition_key(&table_meta, &row);
+                                        let event = WriteRowsEvent {
+                                            table_id: table_meta.table_id(),
+                                            included_columns: Vec::new(),
+                                            rows: vec![row],
+                                        };
+                                        self.send_binlog_event(
+                                            table_meta.clone(),
+                                            key,
+                                            EventData::WriteRows(event),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
+                            EventData::UpdateRows(event) => {
+                                if let Some(table_meta) = self.table_meta_cache.get(&event.table_id)
+                                {
+                                    for (before, after) in event.rows {
+                                        let key = Self::row_partition_key(&table_meta, &before);
+                                        let event = UpdateRowsEvent {
+                                            table_id: table_meta.table_id(),
+                                            included_columns_before: Vec::new(),
+                                            included_columns_after: Vec::new(),
+                                            rows: vec![(before, after)],
+                                        };
+                                        self.send_binlog_event(
+                                            table_meta.clone(),
+                                            key,
+                                            EventData::UpdateRows(event),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
+                            EventData::DeleteRows(event) => {
+                                if let Some(table_meta) = self.table_meta_cache.get(&event.table_id)
+                                {
+                                    for row in event.rows {
+                                        let key = Self::row_partition_key(&table_meta, &row);
+                                        let event = DeleteRowsEvent {
+                                            table_id: table_meta.table_id(),
+                                            included_columns: Vec::new(),
+                                            rows: vec![row],
+                                        };
+                                        self.send_binlog_event(
+                                            table_meta.clone(),
+                                            key,
+                                            EventData::DeleteRows(event),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
                             _ => {
                                 //ignore the event data
                             }
@@ -118,7 +182,53 @@ impl<'a> MysqlBinlogFile<'a> {
     }
 
     async fn record_table_meta(&mut self, event: TableMapEvent) {
-        let cache = self.table_meta_cache.entry(key)
+        if self.table_meta_cache.contains_key(&event.table_id) {
+            return;
+        }
+
+        info!("cache binlog table meta information:{}", event.table_id);
+
+        if let Some(meta) = self
+            .table_schema
+            .desc_table(event.table_id, &event.database_name, &event.table_name)
+            .await
+        {
+            self.table_meta_cache.insert(event.table_id, meta);
+        } else {
+            warn!(
+                "failed to get table meta for {}.{}",
+                event.database_name, event.table_name
+            );
+        }
+    }
+
+    fn row_partition_key(table_meta: &TableMeta, row: &RowEvent) -> String {
+        row.column_values
+            .get(table_meta.primary_index())
+            .map(MysqlRowEventHandler::convert_column_value_to_json)
+            .unwrap_or(serde_json::Value::Null)
+            .to_string()
+    }
+
+    async fn send_binlog_event(
+        &self,
+        table_meta: Arc<TableMeta>,
+        key: String,
+        event_data: EventData,
+    ) {
+        let record = PipelineRecord::create_mysql_binlog_event(
+            "static.binlog".to_string(),
+            key.clone(),
+            table_meta,
+            event_data,
+        );
+
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        let index = hasher.finish() as usize % self.channels.len();
+        if let Err(err) = self.channels[index].send(record).await {
+            warn!("send mysql binglog file event to channel error:{:?}!", err);
+        }
     }
 }
 
