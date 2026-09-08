@@ -64,7 +64,7 @@ impl<'a> MysqlBinlogFile<'a> {
             Ok(walker) => {
                 for file in walker {
                     if let Ok(ele) = file {
-                        let mut file = File::open(ele.path());
+                        let _file = File::open(ele.path());
                     }
                 }
             }
@@ -87,7 +87,7 @@ impl<'a> MysqlBinlogFile<'a> {
             Ok(_) => loop {
                 let event_start_pos = file.stream_position().unwrap_or(0);
                 match parser.next(&mut file) {
-                    Ok((header, data)) => {
+                    Ok((_header, data)) => {
                         match data {
                             EventData::TableMap(event) => {
                                 self.record_table_meta(event);
