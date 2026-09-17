@@ -13,6 +13,8 @@ use crate::pipeline::message::PipelineRecord;
 use crate::sink::SinkStream;
 
 /// MySQL sink for Debezium records.
+/// 执行数据转成sql(insert/delete/update)的DDL语句
+///
 pub struct MysqlSink {
     pool: MySqlPool,
     cache: Cache<String, TableMeta>,
@@ -20,10 +22,6 @@ pub struct MysqlSink {
 }
 
 impl MysqlSink {
-    pub async fn new(url: &str) -> Self {
-        Self::new_with_routes(url, HashMap::new()).await
-    }
-
     pub async fn create(config: &CdcConfig) -> Self {
         let sink = match config.sink() {
             crate::config::sink::Sink::Mysql(mysql) => mysql,
@@ -39,15 +37,15 @@ impl MysqlSink {
             })
             .unwrap_or_default();
 
-        Self::new_with_routes(&sink.url(), route).await
-    }
-
-    pub async fn new_with_routes(url: &str, route: HashMap<String, String>) -> Self {
-        let pool = MySqlPool::connect(url)
+        let pool = MySqlPool::connect(&sink.url())
             .await
-            .expect(format!("connect to mysql use:{} failed", url).as_str());
+            .expect(format!("connect to mysql use:{} failed", &sink.url()).as_str());
         let cache = Cache::new(10000);
-        MysqlSink { pool, cache, route }
+        MysqlSink {
+            pool: pool,
+            cache: cache,
+            route: route,
+        }
     }
 
     pub async fn table_info(&self, source: &str) -> TableMeta {
