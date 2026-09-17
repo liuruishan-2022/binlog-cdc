@@ -92,29 +92,58 @@ impl Metrics {
     }
 
     pub fn register(&self, registry: &mut Registry) {
-        registry.register("flink_mysql_cdc", "flink mysql cdc event count", self.flink_mysql_cdc.clone());
-        registry.register("flink_mysql_desc_table", "flink mysql desc table command total count", self.flink_mysql_desc_table.clone());
-        registry.register("flink_sink_kafka_message", "flink sink kafka message send count total", self.flink_sink_kafka_message.clone());
-        registry.register("flink_mysql_binlog_event_timestamp", "flink mysql binlog event timestamp", self.flink_mysql_binlog_event_timestamp.clone());
+        registry.register(
+            "flink_mysql_cdc",
+            "flink mysql cdc event count",
+            self.flink_mysql_cdc.clone(),
+        );
+        registry.register(
+            "flink_mysql_desc_table",
+            "flink mysql desc table command total count",
+            self.flink_mysql_desc_table.clone(),
+        );
+        registry.register(
+            "flink_sink_kafka_message",
+            "flink sink kafka message send count total",
+            self.flink_sink_kafka_message.clone(),
+        );
+        registry.register(
+            "flink_mysql_binlog_event_timestamp",
+            "flink mysql binlog event timestamp",
+            self.flink_mysql_binlog_event_timestamp.clone(),
+        );
     }
 
     pub fn inc_flink_mysql_cdc(&self, type_name: &str) {
-        self.flink_mysql_cdc.get_or_create(&EventLabel { type_name: type_name.to_string() }).inc();
+        self.flink_mysql_cdc
+            .get_or_create(&EventLabel {
+                type_name: type_name.to_string(),
+            })
+            .inc();
     }
 
     pub fn inc_flink_mysql_desc_table(&self, db_name: &str) {
-        self.flink_mysql_desc_table.get_or_create(&DescTableLabel { db_name: db_name.to_string() }).inc();
+        self.flink_mysql_desc_table
+            .get_or_create(&DescTableLabel {
+                db_name: db_name.to_string(),
+            })
+            .inc();
     }
 
     pub fn inc_flink_sink_kafka_message(&self, event: &str, count: u64) {
-        self.flink_sink_kafka_message.get_or_create(&KafkaLabel { event: event.to_string() }).inc_by(count);
+        self.flink_sink_kafka_message
+            .get_or_create(&KafkaLabel {
+                event: event.to_string(),
+            })
+            .inc_by(count);
     }
 
     pub fn stat_binlog_event_timestamp(&self, timestamp: u32) {
-        self.flink_mysql_binlog_event_timestamp.get_or_create(&BinlogEventLabel {}).set(timestamp as i64);
+        self.flink_mysql_binlog_event_timestamp
+            .get_or_create(&BinlogEventLabel {})
+            .set(timestamp as i64);
     }
 }
-
 
 ///
 /// channel 深度/占用率指标: 判别 source 与 sink 谁是瓶颈的关键数据
@@ -151,8 +180,12 @@ impl ChannelMetrics {
     }
 
     pub fn set(&self, index: usize, depth: usize, capacity: usize) {
-        let label = ChannelLabel { index: index as i64 };
-        self.flink_channel_depth.get_or_create(&label).set(depth as i64);
+        let label = ChannelLabel {
+            index: index as i64,
+        };
+        self.flink_channel_depth
+            .get_or_create(&label)
+            .set(depth as i64);
         let usage = if capacity > 0 {
             (depth as f64 / capacity as f64 * 100.0) as i64
         } else {
@@ -163,7 +196,6 @@ impl ChannelMetrics {
             .set(usage);
     }
 }
-
 
 ///
 /// sink 发送 kafka 的指标: 条数(成败)/批次大小/produce 耗时
@@ -183,7 +215,9 @@ pub struct SinkKafkaMetrics {
 impl SinkKafkaMetrics {
     pub fn register(registry: &mut Registry) -> Self {
         let message_total = Family::default();
-        let batch_size = Histogram::new(vec![1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0, 5000.0]);
+        let batch_size = Histogram::new(vec![
+            1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0, 5000.0,
+        ]);
         let duration = Histogram::new(vec![
             0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
         ]);

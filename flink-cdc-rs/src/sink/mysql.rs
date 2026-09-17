@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
 use serde_json::Value;
+use sqlx::query_builder::Separated;
 use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
 use tracing::{info, warn};
 
@@ -79,10 +80,7 @@ impl MysqlSink {
                 warn!("skip mysql delete because primary key {} missing", key);
                 return;
             };
-            separated
-                .push(key)
-                .push(" = ")
-                .push_bind(json_to_mysql_value(value));
+            push_bound_equality(&mut separated, key, json_to_mysql_value(value));
         }
 
         let result = builder.build().execute(&self.pool).await;
@@ -181,9 +179,7 @@ impl MysqlSink {
                 let value = debezium
                     .after_column(column.column_name())
                     .unwrap_or(&Value::Null);
-                set.push(column.column_name())
-                    .push(" = ")
-                    .push_bind(json_to_mysql_value(value));
+                push_bound_equality(&mut set, column.column_name(), json_to_mysql_value(value));
             }
         }
         builder.push(" WHERE ");
@@ -197,10 +193,7 @@ impl MysqlSink {
                     warn!("skip mysql update because primary key {} missing", key);
                     return;
                 };
-                where_sql
-                    .push(key)
-                    .push(" = ")
-                    .push_bind(json_to_mysql_value(value));
+                push_bound_equality(&mut where_sql, key, json_to_mysql_value(value));
             }
         }
 
@@ -304,6 +297,17 @@ fn json_to_mysql_value(value: &Value) -> Option<String> {
     }
 }
 
+fn push_bound_equality<'qb, 'args>(
+    separated: &mut Separated<'qb, 'args, MySql, &'static str>,
+    column: &str,
+    value: Option<String>,
+) {
+    separated
+        .push(column)
+        .push_unseparated(" = ")
+        .push_bind_unseparated(value);
+}
+
 ///
 /// 放置table的元数据信息的struct
 ///
@@ -334,5 +338,42 @@ impl TableMeta {
 
     pub fn table(&self) -> &str {
         self.table.as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{MySql, QueryBuilder};
+
+    use super::push_bound_equality;
+
+    #[test]
+    fn bound_equalities_in_set_are_separated_by_commas() {
+        let mut builder = QueryBuilder::<MySql>::new("UPDATE test_table SET ");
+        {
+            let mut set = builder.separated(", ");
+            push_bound_equality(&mut set, "hostname", Some("db-host".to_string()));
+            push_bound_equality(&mut set, "port", Some("3306".to_string()));
+        }
+
+        assert_eq!(
+            builder.sql(),
+            "UPDATE test_table SET hostname = ?, port = ?"
+        );
+    }
+
+    #[test]
+    fn bound_equalities_in_where_are_separated_by_and() {
+        let mut builder = QueryBuilder::<MySql>::new("DELETE FROM test_table WHERE ");
+        {
+            let mut conditions = builder.separated(" AND ");
+            push_bound_equality(&mut conditions, "id", Some("1".to_string()));
+            push_bound_equality(&mut conditions, "tenant_id", Some("2".to_string()));
+        }
+
+        assert_eq!(
+            builder.sql(),
+            "DELETE FROM test_table WHERE id = ? AND tenant_id = ?"
+        );
     }
 }
