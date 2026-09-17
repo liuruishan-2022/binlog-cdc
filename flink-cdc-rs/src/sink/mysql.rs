@@ -7,7 +7,6 @@ use sqlx::query_builder::Separated;
 use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
 use tracing::{info, warn};
 
-use crate::common::schema::ColumnMeta;
 use crate::config::CdcConfig;
 use crate::pipeline::formatter::DebeziumFormat;
 use crate::pipeline::message::PipelineRecord;
@@ -80,7 +79,18 @@ impl MysqlSink {
                 warn!("skip mysql delete because primary key {} missing", key);
                 return;
             };
-            push_bound_equality(&mut separated, key, json_to_mysql_value(value));
+            let Some(column) = meta.column(key) else {
+                warn!(
+                    "skip mysql delete because primary key metadata {} missing",
+                    key
+                );
+                return;
+            };
+            push_bound_equality(
+                &mut separated,
+                key,
+                json_to_mysql_value(value, column.column_type()),
+            );
         }
 
         let result = builder.build().execute(&self.pool).await;
@@ -116,7 +126,10 @@ impl MysqlSink {
                 let value = debezium
                     .after_column(column.column_name())
                     .unwrap_or(&Value::Null);
-                (column.column_name(), json_to_mysql_value(value))
+                (
+                    column.column_name(),
+                    json_to_mysql_value(value, column.column_type()),
+                )
             })
             .collect::<Vec<_>>();
         let mut builder = build_upsert_query(meta.table(), &values, meta.primary_keys());
@@ -153,15 +166,18 @@ impl MysqlSink {
         let sql = format!("desc {}", table);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
 
-        let mut source_position = 1;
         let mut columns = vec![];
         while let Some(row) = rows.try_next().await.unwrap() {
             let field: &str = row.try_get("Field").expect("fetch desc table field error!");
+            let column_type: &str = row.try_get("Type").expect("fetch desc table type error!");
             let key: Result<Vec<u8>, sqlx::Error> = row.try_get("Key");
             let key = Self::judge_primary_key(key);
 
-            columns.push(ColumnMeta::new(source_position, field.to_string(), key));
-            source_position += 1;
+            columns.push(MysqlColumnMeta::new(
+                field.to_string(),
+                column_type.to_string(),
+                key,
+            ));
         }
 
         TableMeta::new(table.to_string(), columns)
@@ -210,23 +226,42 @@ impl SinkStream for MysqlSink {
     async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
 }
 
-fn json_to_mysql_value(value: &Value) -> Option<String> {
+#[derive(Debug, Clone, PartialEq)]
+enum MysqlBindValue {
+    Null,
+    Bool(bool),
+    String(String),
+}
+
+fn json_to_mysql_value(value: &Value, column_type: &str) -> MysqlBindValue {
+    if column_type.eq_ignore_ascii_case("bit(1)") {
+        return match value {
+            Value::Null => MysqlBindValue::Null,
+            Value::Bool(value) => MysqlBindValue::Bool(*value),
+            Value::Number(value) if value.as_u64() == Some(0) => MysqlBindValue::Bool(false),
+            Value::Number(value) if value.as_u64() == Some(1) => MysqlBindValue::Bool(true),
+            Value::String(value) if value == "0" => MysqlBindValue::Bool(false),
+            Value::String(value) if value == "1" => MysqlBindValue::Bool(true),
+            _ => MysqlBindValue::String(value.to_string()),
+        };
+    }
+
     match value {
-        Value::Null => None,
-        Value::Bool(value) => Some(if *value {
+        Value::Null => MysqlBindValue::Null,
+        Value::Bool(value) => MysqlBindValue::String(if *value {
             "1".to_string()
         } else {
             "0".to_string()
         }),
-        Value::Number(value) => Some(value.to_string()),
-        Value::String(value) => Some(value.clone()),
-        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
+        Value::Number(value) => MysqlBindValue::String(value.to_string()),
+        Value::String(value) => MysqlBindValue::String(value.clone()),
+        Value::Array(_) | Value::Object(_) => MysqlBindValue::String(value.to_string()),
     }
 }
 
 fn build_upsert_query(
     table: &str,
-    columns: &[(&str, Option<String>)],
+    columns: &[(&str, MysqlBindValue)],
     primary_keys: &[String],
 ) -> QueryBuilder<'static, MySql> {
     let mut builder = QueryBuilder::<MySql>::new("INSERT INTO ");
@@ -241,7 +276,7 @@ fn build_upsert_query(
     {
         let mut values = builder.separated(", ");
         for (_, value) in columns {
-            values.push_bind(value.clone());
+            push_mysql_bind(&mut values, value.clone());
         }
     }
     builder.push(") ON DUPLICATE KEY UPDATE ");
@@ -270,12 +305,61 @@ fn build_upsert_query(
 fn push_bound_equality<'qb, 'args>(
     separated: &mut Separated<'qb, 'args, MySql, &'static str>,
     column: &str,
-    value: Option<String>,
+    value: MysqlBindValue,
 ) {
-    separated
-        .push(column)
-        .push_unseparated(" = ")
-        .push_bind_unseparated(value);
+    separated.push(column).push_unseparated(" = ");
+    push_mysql_bind_unseparated(separated, value);
+}
+
+fn push_mysql_bind<'qb, 'args>(
+    separated: &mut Separated<'qb, 'args, MySql, &'static str>,
+    value: MysqlBindValue,
+) {
+    match value {
+        MysqlBindValue::Null => separated.push_bind(Option::<String>::None),
+        MysqlBindValue::Bool(value) => separated.push_bind(value),
+        MysqlBindValue::String(value) => separated.push_bind(value),
+    };
+}
+
+fn push_mysql_bind_unseparated<'qb, 'args>(
+    separated: &mut Separated<'qb, 'args, MySql, &'static str>,
+    value: MysqlBindValue,
+) {
+    match value {
+        MysqlBindValue::Null => separated.push_bind_unseparated(Option::<String>::None),
+        MysqlBindValue::Bool(value) => separated.push_bind_unseparated(value),
+        MysqlBindValue::String(value) => separated.push_bind_unseparated(value),
+    };
+}
+
+#[derive(Debug, Clone)]
+pub struct MysqlColumnMeta {
+    column_name: String,
+    column_type: String,
+    is_primary_key: bool,
+}
+
+impl MysqlColumnMeta {
+    fn new(column_name: String, column_type: String, is_primary_key: bool) -> Self {
+        Self {
+            column_name,
+            column_type,
+            is_primary_key,
+        }
+    }
+
+    fn column_name(&self) -> &str {
+        &self.column_name
+    }
+
+    fn column_type(&self) -> &str {
+        &self.column_type
+    }
+
+    fn is_primary(&self) -> bool {
+        self.is_primary_key
+    }
 }
 
 ///
@@ -284,12 +368,12 @@ fn push_bound_equality<'qb, 'args>(
 #[derive(Debug, Clone)]
 pub struct TableMeta {
     table: String,
-    columns: Vec<ColumnMeta>,
+    columns: Vec<MysqlColumnMeta>,
     primary_keys: Vec<String>,
 }
 
 impl TableMeta {
-    pub fn new(table: String, columns: Vec<ColumnMeta>) -> Self {
+    pub fn new(table: String, columns: Vec<MysqlColumnMeta>) -> Self {
         let keys = columns
             .iter()
             .filter(|ele| ele.is_primary())
@@ -306,6 +390,12 @@ impl TableMeta {
         &self.primary_keys
     }
 
+    fn column(&self, column_name: &str) -> Option<&MysqlColumnMeta> {
+        self.columns
+            .iter()
+            .find(|column| column.column_name() == column_name)
+    }
+
     pub fn table(&self) -> &str {
         self.table.as_str()
     }
@@ -313,16 +403,37 @@ impl TableMeta {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use sqlx::{MySql, QueryBuilder};
 
-    use super::{build_upsert_query, push_bound_equality};
+    use super::{MysqlBindValue, build_upsert_query, json_to_mysql_value, push_bound_equality};
+
+    #[test]
+    fn bit_one_numeric_values_are_bound_as_booleans() {
+        assert_eq!(
+            json_to_mysql_value(&json!(0), "bit(1)"),
+            MysqlBindValue::Bool(false)
+        );
+        assert_eq!(
+            json_to_mysql_value(&json!(1), "BIT(1)"),
+            MysqlBindValue::Bool(true)
+        );
+    }
+
+    #[test]
+    fn non_bit_values_keep_the_existing_string_binding() {
+        assert_eq!(
+            json_to_mysql_value(&json!(0), "int(11)"),
+            MysqlBindValue::String("0".to_string())
+        );
+    }
 
     #[test]
     fn upsert_inserts_missing_rows_and_updates_non_primary_columns() {
         let columns = vec![
-            ("id", Some("1603999".to_string())),
-            ("hostname", Some(String::new())),
-            ("port", Some("-1".to_string())),
+            ("id", MysqlBindValue::String("1603999".to_string())),
+            ("hostname", MysqlBindValue::String(String::new())),
+            ("port", MysqlBindValue::String("-1".to_string())),
         ];
         let primary_keys = vec!["id".to_string()];
 
@@ -340,8 +451,12 @@ ON DUPLICATE KEY UPDATE hostname = VALUES(hostname), port = VALUES(port)"
         let mut builder = QueryBuilder::<MySql>::new("UPDATE test_table SET ");
         {
             let mut set = builder.separated(", ");
-            push_bound_equality(&mut set, "hostname", Some("db-host".to_string()));
-            push_bound_equality(&mut set, "port", Some("3306".to_string()));
+            push_bound_equality(
+                &mut set,
+                "hostname",
+                MysqlBindValue::String("db-host".to_string()),
+            );
+            push_bound_equality(&mut set, "port", MysqlBindValue::String("3306".to_string()));
         }
 
         assert_eq!(
@@ -355,8 +470,16 @@ ON DUPLICATE KEY UPDATE hostname = VALUES(hostname), port = VALUES(port)"
         let mut builder = QueryBuilder::<MySql>::new("DELETE FROM test_table WHERE ");
         {
             let mut conditions = builder.separated(" AND ");
-            push_bound_equality(&mut conditions, "id", Some("1".to_string()));
-            push_bound_equality(&mut conditions, "tenant_id", Some("2".to_string()));
+            push_bound_equality(
+                &mut conditions,
+                "id",
+                MysqlBindValue::String("1".to_string()),
+            );
+            push_bound_equality(
+                &mut conditions,
+                "tenant_id",
+                MysqlBindValue::String("2".to_string()),
+            );
         }
 
         assert_eq!(

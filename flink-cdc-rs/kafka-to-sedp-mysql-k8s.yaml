@@ -11,7 +11,7 @@ data:
       type: kafka
       name: Kafka-Source
       properties.bootstrap.servers: 172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092
-      properties.group.id: test-flink-cdc-kafka-to-sedp-mysql-v1
+      properties.group.id: test-flink-cdc-kafka-to-sedp-mysql-v2
     sink:
       type: mysql
       hostname: 172.16.1.77
@@ -65,7 +65,7 @@ spec:
     spec:
       containers:
         - name: flink-cdc
-          image: xwharbor.wxchina.com/cpaas/component/flink-cdc:v3.6.0-647e5fb0c8
+          image: xwharbor.wxchina.com/cpaas/component/flink-cdc:v3.6.0-52bfb65d56
           imagePullPolicy: Always
           args:
             - --flink-cdc
