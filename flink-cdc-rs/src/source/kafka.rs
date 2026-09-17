@@ -4,7 +4,7 @@ use rdkafka::{
     consumer::{Consumer, StreamConsumer},
     error::KafkaError,
 };
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::{
     config::{CdcConfig, source::Kafka as KafkaConfig},
