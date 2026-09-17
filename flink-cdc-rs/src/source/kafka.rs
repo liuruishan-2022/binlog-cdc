@@ -46,8 +46,6 @@ where
     pub async fn start(&self) {
         let consumer = self.build_consumer().expect("build consumer error!");
         let stream = consumer.stream().try_for_each(|message| async move {
-            info!("消费到消息内容");
-
             let Some(payload) = message.payload() else {
                 warn!("kafka message payload is empty, topic={}", message.topic());
                 return Ok(());

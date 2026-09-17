@@ -218,7 +218,10 @@ impl SinkStream for MysqlSink {
                 self.upsert_data(debezium, topic).await;
             }
             _ => {
-                warn!("未知的操作类型:{}", debezium.op());
+                warn!(
+                    "unknown operator type:{} (d:delete c:create r:read u:update)",
+                    debezium.op()
+                );
             }
         }
     }
