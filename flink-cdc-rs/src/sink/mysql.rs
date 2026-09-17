@@ -94,7 +94,7 @@ impl MysqlSink {
         }
     }
 
-    pub async fn insert_data(&self, debezium: &DebeziumFormat, topic: &str) {
+    pub async fn upsert_data(&self, debezium: &DebeziumFormat, topic: &str) {
         let meta = self.table_info(topic).await;
         let columns = meta
             .columns
@@ -104,107 +104,37 @@ impl MysqlSink {
 
         if columns.is_empty() {
             warn!(
-                "skip mysql insert because after has no known columns, topic={}",
+                "skip mysql upsert because after has no known columns, topic={}",
                 topic
             );
             return;
         }
 
-        let mut builder = QueryBuilder::<MySql>::new("INSERT INTO ");
-        builder.push(meta.table()).push(" (");
-        {
-            let mut column_names = builder.separated(", ");
-            for column in &columns {
-                column_names.push(column.column_name());
-            }
-        }
-        builder.push(") VALUES (");
-        {
-            let mut values = builder.separated(", ");
-            for column in &columns {
+        let values = columns
+            .iter()
+            .map(|column| {
                 let value = debezium
                     .after_column(column.column_name())
                     .unwrap_or(&Value::Null);
-                values.push_bind(json_to_mysql_value(value));
-            }
-        }
-        builder.push(")");
-
-        let result = builder.build().execute(&self.pool).await;
-        match result {
-            Ok(result) => info!(
-                "mysql insert rows:{} table:{}",
-                result.rows_affected(),
-                meta.table()
-            ),
-            Err(err) => warn!("mysql insert error:{:?} table:{}", err, meta.table()),
-        }
-    }
-
-    pub async fn update_data(&self, debezium: &DebeziumFormat, topic: &str) {
-        let meta = self.table_info(topic).await;
-        if meta.primary_keys().is_empty() {
-            warn!(
-                "skip mysql update because table has no primary key: {}",
-                meta.table()
-            );
-            return;
-        }
-
-        let columns = meta
-            .columns
-            .iter()
-            .filter(|column| debezium.after_column(column.column_name()).is_some())
-            .filter(|column| {
-                !meta
-                    .primary_keys()
-                    .iter()
-                    .any(|key| key == column.column_name())
+                (column.column_name(), json_to_mysql_value(value))
             })
             .collect::<Vec<_>>();
-
-        if columns.is_empty() {
-            warn!(
-                "skip mysql update because after has no non-primary columns, topic={}",
-                topic
-            );
-            return;
-        }
-
-        let mut builder = QueryBuilder::<MySql>::new("UPDATE ");
-        builder.push(meta.table()).push(" SET ");
-        {
-            let mut set = builder.separated(", ");
-            for column in &columns {
-                let value = debezium
-                    .after_column(column.column_name())
-                    .unwrap_or(&Value::Null);
-                push_bound_equality(&mut set, column.column_name(), json_to_mysql_value(value));
-            }
-        }
-        builder.push(" WHERE ");
-        {
-            let mut where_sql = builder.separated(" AND ");
-            for key in meta.primary_keys() {
-                let value = debezium
-                    .after_column(key)
-                    .or_else(|| debezium.before_column(key));
-                let Some(value) = value else {
-                    warn!("skip mysql update because primary key {} missing", key);
-                    return;
-                };
-                push_bound_equality(&mut where_sql, key, json_to_mysql_value(value));
-            }
-        }
+        let mut builder = build_upsert_query(meta.table(), &values, meta.primary_keys());
 
         let result = builder.build().execute(&self.pool).await;
         match result {
             Ok(result) => info!(
-                "mysql update rows:{} table:{}",
+                "mysql upsert op:{} rows:{} table:{}",
+                debezium.op(),
                 result.rows_affected(),
                 meta.table()
             ),
-            Err(err) => warn!("mysql update error:{:?} table:{}", err, meta.table()),
+            Err(err) => warn!(
+                "mysql upsert op:{} error:{:?} table:{}",
+                debezium.op(),
+                err,
+                meta.table()
+            ),
         }
     }
 
@@ -268,11 +198,8 @@ impl SinkStream for MysqlSink {
             "d" => {
                 self.delete(debezium, topic).await;
             }
-            "c" | "r" => {
-                self.insert_data(debezium, topic).await;
-            }
-            "u" => {
-                self.update_data(debezium, topic).await;
+            "c" | "r" | "u" => {
+                self.upsert_data(debezium, topic).await;
             }
             _ => {
                 warn!("未知的操作类型:{}", debezium.op());
@@ -295,6 +222,49 @@ fn json_to_mysql_value(value: &Value) -> Option<String> {
         Value::String(value) => Some(value.clone()),
         Value::Array(_) | Value::Object(_) => Some(value.to_string()),
     }
+}
+
+fn build_upsert_query(
+    table: &str,
+    columns: &[(&str, Option<String>)],
+    primary_keys: &[String],
+) -> QueryBuilder<'static, MySql> {
+    let mut builder = QueryBuilder::<MySql>::new("INSERT INTO ");
+    builder.push(table).push(" (");
+    {
+        let mut column_names = builder.separated(", ");
+        for (column, _) in columns {
+            column_names.push(column);
+        }
+    }
+    builder.push(") VALUES (");
+    {
+        let mut values = builder.separated(", ");
+        for (_, value) in columns {
+            values.push_bind(value.clone());
+        }
+    }
+    builder.push(") ON DUPLICATE KEY UPDATE ");
+    {
+        let mut update_columns = columns
+            .iter()
+            .map(|(column, _)| *column)
+            .filter(|column| !primary_keys.iter().any(|key| key == column))
+            .collect::<Vec<_>>();
+        if update_columns.is_empty() {
+            update_columns.push(columns[0].0);
+        }
+
+        let mut assignments = builder.separated(", ");
+        for column in update_columns {
+            assignments
+                .push(column)
+                .push_unseparated(" = VALUES(")
+                .push_unseparated(column)
+                .push_unseparated(")");
+        }
+    }
+    builder
 }
 
 fn push_bound_equality<'qb, 'args>(
@@ -345,7 +315,25 @@ impl TableMeta {
 mod tests {
     use sqlx::{MySql, QueryBuilder};
 
-    use super::push_bound_equality;
+    use super::{build_upsert_query, push_bound_equality};
+
+    #[test]
+    fn upsert_inserts_missing_rows_and_updates_non_primary_columns() {
+        let columns = vec![
+            ("id", Some("1603999".to_string())),
+            ("hostname", Some(String::new())),
+            ("port", Some("-1".to_string())),
+        ];
+        let primary_keys = vec!["id".to_string()];
+
+        let builder = build_upsert_query("test_table", &columns, &primary_keys);
+
+        assert_eq!(
+            builder.sql(),
+            "INSERT INTO test_table (id, hostname, port) VALUES (?, ?, ?) \
+ON DUPLICATE KEY UPDATE hostname = VALUES(hostname), port = VALUES(port)"
+        );
+    }
 
     #[test]
     fn bound_equalities_in_set_are_separated_by_commas() {
