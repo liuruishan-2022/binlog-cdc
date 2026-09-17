@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flink-cdc-kafka-to-sedp-mysql-cm
+  namespace: sedp-flink
+  labels:
+    app: flink-cdc-kafka-to-sedp-mysql
+data:
+  flink-cdc.yaml: |-
+    source:
+      type: kafka
+      name: Kafka-Source
+      properties.bootstrap.servers: 172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092
+      properties.group.id: test-flink-cdc-kafka-to-sedp-mysql-v1
+    sink:
+      type: mysql
+      hostname: 172.16.1.77
+      port: 3306
+      username: "root"
+      password: "jx@xw!@#$~|{}"
+    route:
+      - source-table: test-kafka-gsms-biz-application
+        sink-table: sedp_biz_test.sedp_gsms_biz_application
+      - source-table: test-kafka-gsms-business-type
+        sink-table: sedp_biz_test.sedp_gsms_business_type
+      - source-table: test-kafka-gsms-carrier-channel
+        sink-table: sedp_biz_test.sedp_gsms_carrier_channel
+      - source-table: test-kafka-gsms-channel-resousetype
+        sink-table: sedp_biz_test.sedp_gsms_channel_resousetype
+      - source-table: test-kafka-gsms-enterprise-apply
+        sink-table: sedp_biz_test.sedp_gsms_enterprise_apply
+      - source-table: test-kafka-gsms-region-carrier
+        sink-table: sedp_biz_test.sedp_gsms_region_carrier
+      - source-table: test-kafka-gsms-region-code
+        sink-table: sedp_biz_test.sedp_gsms_region_code
+      - source-table: test-kafka-gsms-user
+        sink-table: sedp_biz_test.sedp_gsms_user
+      - source-table: test-kafka-gsms-user-ext
+        sink-table: sedp_biz_test.sedp_gsms_user_ext
+      - source-table: test-kafka-gsms-user-info
+        sink-table: sedp_biz_test.sedp_gsms_user_info
+    pipeline:
+      name: sync mostest gsms kafka topics to sedp mysql
+      parallelism: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-cdc-kafka-to-sedp-mysql
+  namespace: sedp-flink
+  labels:
+    app: flink-cdc-kafka-to-sedp-mysql
+spec:
+  selector:
+    matchLabels:
+      app: flink-cdc-kafka-to-sedp-mysql
+  template:
+    metadata:
+      labels:
+        app: flink-cdc-kafka-to-sedp-mysql
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "9249"
+        prometheus.io/scrape: "true"
+    spec:
+      containers:
+        - name: flink-cdc
+          image: xwharbor.wxchina.com/cpaas-pub/component/flink-cdc:v3.6.0-eacf801539
+          imagePullPolicy: Always
+          args:
+            - --flink-cdc
+            - /opt/conf/flink-cdc.yaml
+          ports:
+            - name: metrics
+              containerPort: 9249
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: pipeline-config
+              mountPath: /opt/conf
+            - name: localtime
+              mountPath: /etc/localtime
+              readOnly: true
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: pipeline-config
+          configMap:
+            name: flink-cdc-kafka-to-sedp-mysql-cm
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+            type: File
