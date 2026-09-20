@@ -69,7 +69,6 @@ impl MysqlSink {
             );
             return;
         }
-        /// 使用sea-query
         let mut delete = Query::delete();
         let delete = delete.from_table(meta.table().to_string());
         for ele in meta.primary_keys() {
@@ -78,7 +77,9 @@ impl MysqlSink {
             }
         }
 
-        let result = sqlx::query(&delete.to_string(MysqlQueryBuilder)).fetch(&self.pool);
+        let result = sqlx::query(&delete.to_string(MysqlQueryBuilder))
+            .execute(&self.pool)
+            .await;
         match result {
             Ok(result) => info!(
                 "mysql delete rows:{} table:{}",
