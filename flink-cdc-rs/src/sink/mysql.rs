@@ -70,34 +70,15 @@ impl MysqlSink {
             return;
         }
         /// 使用sea-query
-        let delete = Query::delete()
-            .from_table(meta.table().to_string())
-            .and_where(Expr::col("id").eq(1))
-            .to_string(MysqlQueryBuilder);
-
-        let mut builder = QueryBuilder::<MySql>::new("DELETE FROM ");
-        builder.push(meta.table()).push(" WHERE ");
-        let mut separated = builder.separated(" AND ");
-        for key in meta.primary_keys() {
-            let Some(value) = debezium.before_column(key) else {
-                warn!("skip mysql delete because primary key {} missing", key);
-                return;
-            };
-            let Some(column) = meta.column(key) else {
-                warn!(
-                    "skip mysql delete because primary key metadata {} missing",
-                    key
-                );
-                return;
-            };
-            push_bound_equality(
-                &mut separated,
-                key,
-                json_to_mysql_value(value, column.column_type()),
-            );
+        let mut delete = Query::delete();
+        let delete = delete.from_table(meta.table().to_string());
+        for ele in meta.primary_keys() {
+            if let Some(value) = debezium.before_column(ele) {
+                delete.and_where(Expr::col(ele.to_string()).eq(value.to_string()));
+            }
         }
 
-        let result = builder.build().execute(&self.pool).await;
+        let result = sqlx::query(&delete.to_string(MysqlQueryBuilder)).fetch(&self.pool);
         match result {
             Ok(result) => info!(
                 "mysql delete rows:{} table:{}",
