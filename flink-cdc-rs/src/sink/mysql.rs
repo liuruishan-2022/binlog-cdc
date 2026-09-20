@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
+use sea_query::{Expr, ExprTrait, MysqlQueryBuilder, Query};
 use serde_json::Value;
 use sqlx::query_builder::Separated;
 use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
@@ -68,6 +69,11 @@ impl MysqlSink {
             );
             return;
         }
+        /// 使用sea-query
+        let delete = Query::delete()
+            .from_table(meta.table().to_string())
+            .and_where(Expr::col("id").eq(1))
+            .to_string(MysqlQueryBuilder);
 
         let mut builder = QueryBuilder::<MySql>::new("DELETE FROM ");
         builder.push(meta.table()).push(" WHERE ");
