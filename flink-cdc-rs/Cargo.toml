@@ -44,6 +44,8 @@ zip = { version = "7.0.0", default-features = false, features = [
     "zstd",
 ] }
 globwalk = "0.9.1"
+sea-query = "1.0.2"
+sea-query-sqlx = "0.8.1"
 
 [profile.dev]
 opt-level = 0
