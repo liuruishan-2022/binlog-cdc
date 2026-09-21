@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
 use sea_query::{Alias, Expr, ExprTrait, MysqlQueryBuilder, OnConflict, Query};
-use serde_json::Value;
-use sqlx::query_builder::Separated;
-use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
+use sqlx::{MySqlPool, Row};
 use tracing::{info, warn};
 
 use crate::config::CdcConfig;
