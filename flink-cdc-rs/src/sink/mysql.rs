@@ -149,7 +149,7 @@ impl MysqlSink {
     }
 
     async fn desc_table(&self, table: &str) -> TableMeta {
-        let sql = format!("desc {}", table);
+        let sql = format!("desc `{}`", table);
         let mut rows = sqlx::query(&sql).fetch(&self.pool);
 
         let mut columns = vec![];
