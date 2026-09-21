@@ -207,13 +207,6 @@ impl SinkStream for MysqlSink {
     async fn handle_messages(&self, _messages: Vec<DebeziumFormat>) {}
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum MysqlBindValue {
-    Null,
-    Bool(bool),
-    String(String),
-}
-
 #[derive(Debug, Clone)]
 pub struct MysqlColumnMeta {
     column_name: String,
@@ -273,5 +266,133 @@ impl TableMeta {
 
     pub fn table(&self) -> &str {
         self.table.as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::formatter::MessageKey;
+    use serde_json::json;
+
+    fn column(name: &str, column_type: &str, primary: bool) -> MysqlColumnMeta {
+        MysqlColumnMeta::new(name.to_owned(), column_type.to_owned(), primary)
+    }
+
+    fn insert_record(after: serde_json::Value) -> DebeziumFormat {
+        DebeziumFormat::insert(after, "source_db", "source_table", MessageKey::default())
+    }
+
+    fn sql(meta: &TableMeta, record: &DebeziumFormat) -> String {
+        let (columns, values): (Vec<Alias>, Vec<Expr>) = meta
+            .columns
+            .iter()
+            .map(|column| {
+                let value = record
+                    .after_column(column.column_name())
+                    .map_or(Expr::null(), |value| Expr::val(value.clone()));
+                (Alias::new(column.column_name()), value)
+            })
+            .unzip();
+        let update_columns = meta
+            .columns
+            .iter()
+            .filter(|column| !column.is_primary())
+            .map(|column| Alias::new(column.column_name()))
+            .collect::<Vec<_>>();
+
+        Query::insert()
+            .into_table(Alias::new(meta.table()))
+            .columns(columns)
+            .values_panic(values)
+            .on_conflict(OnConflict::new().update_columns(update_columns).to_owned())
+            .take()
+            .to_string(MysqlQueryBuilder)
+    }
+
+    #[test]
+    fn builds_mysql_upsert_for_scalar_values_and_excludes_primary_key_from_updates() {
+        let meta = TableMeta::new(
+            "users".to_owned(),
+            vec![
+                column("id", "bigint", true),
+                column("username", "varchar(64)", false),
+                column("enabled", "tinyint(1)", false),
+                column("score", "double", false),
+            ],
+        );
+        let record = insert_record(json!({
+            "id": 7,
+            "username": "alice",
+            "enabled": true,
+            "score": 12.5
+        }));
+
+        assert_eq!(
+            sql(&meta, &record),
+            "INSERT INTO `users` (`id`, `username`, `enabled`, `score`) VALUES (7, 'alice', TRUE, 12.5) ON DUPLICATE KEY UPDATE `username` = VALUES(`username`), `enabled` = VALUES(`enabled`), `score` = VALUES(`score`)"
+        );
+    }
+
+    #[test]
+    fn translates_explicit_null_and_missing_column_to_sql_null() {
+        let meta = TableMeta::new(
+            "users".to_owned(),
+            vec![
+                column("id", "bigint", true),
+                column("nickname", "varchar(64)", false),
+                column("email", "varchar(128)", false),
+            ],
+        );
+        let record = insert_record(json!({"id": 8, "nickname": null}));
+
+        assert_eq!(
+            sql(&meta, &record),
+            "INSERT INTO `users` (`id`, `nickname`, `email`) VALUES (8, NULL, NULL) ON DUPLICATE KEY UPDATE `nickname` = VALUES(`nickname`), `email` = VALUES(`email`)"
+        );
+    }
+
+    #[test]
+    fn uses_primary_key_self_assignment_when_table_has_no_update_columns() {
+        let meta = TableMeta::new(
+            "identity_only".to_owned(),
+            vec![column("id", "bigint", true)],
+        );
+        let record = insert_record(json!({"id": 9}));
+
+        assert_eq!(
+            sql(&meta, &record),
+            "INSERT INTO `identity_only` (`id`) VALUES (9) ON DUPLICATE KEY UPDATE `id` = VALUES(`id`)"
+        );
+    }
+
+    #[test]
+    fn quotes_dynamic_mysql_table_and_column_identifiers() {
+        let meta = TableMeta::new(
+            "order".to_owned(),
+            vec![column("select", "varchar(64)", false)],
+        );
+        let record = insert_record(json!({}));
+
+        assert_eq!(
+            sql(&meta, &record),
+            "INSERT INTO `order` (`select`) VALUES (NULL) ON DUPLICATE KEY UPDATE `select` = VALUES(`select`)"
+        );
+    }
+
+    #[test]
+    fn preserves_json_objects_for_json_columns() {
+        let meta = TableMeta::new(
+            "user_profiles".to_owned(),
+            vec![column("profile", "json", false)],
+        );
+        let record = insert_record(json!({
+            "profile": {"role": "admin", "active": true}
+        }));
+
+        assert_eq!(
+            sql(&meta, &record),
+            r#"INSERT INTO `user_profiles` (`profile`) VALUES ('{\"role\":\"admin\",\"active\":true}') ON DUPLICATE KEY UPDATE `profile` = VALUES(`profile`)"#
+        );
     }
 }
