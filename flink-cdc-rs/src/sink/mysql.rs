@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
-use sea_query::{Expr, ExprTrait, MysqlQueryBuilder, Query};
+use sea_query::{Alias, Expr, ExprTrait, MysqlQueryBuilder, OnConflict, Query};
 use serde_json::Value;
 use sqlx::query_builder::Separated;
 use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
@@ -88,6 +88,35 @@ impl MysqlSink {
             ),
             Err(err) => warn!("mysql delete error:{:?} table:{}", err, meta.table()),
         }
+    }
+
+    pub async fn insert_update_data(&self, debezium: &DebeziumFormat, topic: &str) {
+        let meta = self.table_info(topic).await;
+        let (columns, values): (Vec<Alias>, Vec<Expr>) = meta
+            .columns
+            .iter()
+            .map(|ele| {
+                let value = debezium
+                    .after_column(ele.column_name())
+                    .map_or(Expr::null(), |v| Expr::val(v.clone()));
+                (Alias::new(ele.column_name()), value)
+            })
+            .unzip();
+
+        let mut update_columns = meta
+            .columns
+            .iter()
+            .filter(|ele| !ele.is_primary())
+            .collect();
+
+        let on_conflict = OnConflict::new().update_columns(update_columns).to_owned();
+
+        Query::insert()
+            .into_table(Alias::new(meta.table()))
+            .columns(columns)
+            .values_panic(values)
+            .on_conflict(on_conflict)
+            .take();
     }
 
     pub async fn upsert_data(&self, debezium: &DebeziumFormat, topic: &str) {
@@ -253,6 +282,18 @@ fn build_upsert_query(
     columns: &[(&str, MysqlBindValue)],
     primary_keys: &[String],
 ) -> QueryBuilder<'static, MySql> {
+    let mut insert = Query::insert();
+    insert.into_table(table.to_string());
+
+    let exp_columns = columns
+        .iter()
+        .map(|(column, _)| column.to_string())
+        .collect::<Vec<String>>();
+    insert
+        .columns(exp_columns)
+        .values([1.into(), "2".into()])
+        .unwrap();
+
     let mut builder = QueryBuilder::<MySql>::new("INSERT INTO ");
     builder.push(table).push(" (");
     {
@@ -291,15 +332,6 @@ fn build_upsert_query(
     builder
 }
 
-fn push_bound_equality<'qb, 'args>(
-    separated: &mut Separated<'qb, 'args, MySql, &'static str>,
-    column: &str,
-    value: MysqlBindValue,
-) {
-    separated.push(column).push_unseparated(" = ");
-    push_mysql_bind_unseparated(separated, value);
-}
-
 fn push_mysql_bind<'qb, 'args>(
     separated: &mut Separated<'qb, 'args, MySql, &'static str>,
     value: MysqlBindValue,
@@ -308,17 +340,6 @@ fn push_mysql_bind<'qb, 'args>(
         MysqlBindValue::Null => separated.push_bind(Option::<String>::None),
         MysqlBindValue::Bool(value) => separated.push_bind(value),
         MysqlBindValue::String(value) => separated.push_bind(value),
-    };
-}
-
-fn push_mysql_bind_unseparated<'qb, 'args>(
-    separated: &mut Separated<'qb, 'args, MySql, &'static str>,
-    value: MysqlBindValue,
-) {
-    match value {
-        MysqlBindValue::Null => separated.push_bind_unseparated(Option::<String>::None),
-        MysqlBindValue::Bool(value) => separated.push_bind_unseparated(value),
-        MysqlBindValue::String(value) => separated.push_bind_unseparated(value),
     };
 }
 
