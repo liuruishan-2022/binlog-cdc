@@ -68,7 +68,8 @@ impl MysqlSink {
             return;
         }
         let mut delete = Query::delete();
-        let delete = delete.from_table(meta.table().to_string());
+        let (db, table) = Self::split_db_table(&meta);
+        let delete = delete.from_table((Alias::new(db), Alias::new(table)));
         for ele in meta.primary_keys() {
             if let Some(value) = debezium.before_column(ele) {
                 delete.and_where(Expr::col(ele.to_string()).eq(Self::convert_expr(value)));
@@ -116,8 +117,9 @@ impl MysqlSink {
 
         let on_conflict = OnConflict::new().update_columns(update_columns).to_owned();
 
+        let (db, table) = Self::split_db_table(&meta);
         let update_insert = Query::insert()
-            .into_table(Alias::new(meta.table()))
+            .into_table((Alias::new(db), Alias::new(table)))
             .columns(columns)
             .values_panic(values)
             .on_conflict(on_conflict)
@@ -133,6 +135,14 @@ impl MysqlSink {
             ),
             Err(err) => warn!("mysql delete error:{:?} table:{}", err, meta.table()),
         }
+    }
+
+    fn split_db_table(meta: &TableMeta) -> (String, String) {
+        let (db, table) = meta
+            .table()
+            .split_once('.')
+            .expect(format!("table must use database.table format of:{}", meta.table()).as_str());
+        (db.to_string(), table.to_string())
     }
 
     fn convert_expr(value: &serde_json::Value) -> Expr {
@@ -334,13 +344,49 @@ mod tests {
             }
         }
 
+        let (db, table) = MysqlSink::split_db_table(meta);
         Query::insert()
-            .into_table(Alias::new(meta.table()))
+            .into_table((Alias::new(db), Alias::new(table)))
             .columns(columns)
             .values_panic(values)
             .on_conflict(OnConflict::new().update_columns(update_columns).to_owned())
             .take()
             .to_string(MysqlQueryBuilder)
+    }
+
+    #[test]
+    fn qualifies_database_and_table_separately_for_upsert() {
+        let meta = TableMeta::new(
+            "sedp_biz_test.sedp_gsms_carrier_channel".to_owned(),
+            vec![
+                column("id", "bigint", true),
+                column("name", "varchar(64)", false),
+            ],
+        );
+        let record = insert_record(json!({"id": 7, "name": "channel-a"}));
+
+        assert_eq!(
+            sql(&meta, &record),
+            "INSERT INTO `sedp_biz_test`.`sedp_gsms_carrier_channel` (`id`, `name`) VALUES (7, 'channel-a') ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)"
+        );
+    }
+
+    #[test]
+    fn qualifies_database_and_table_separately_for_delete() {
+        let meta = TableMeta::new(
+            "sedp_biz_test.sedp_gsms_carrier_channel".to_owned(),
+            vec![column("id", "bigint", true)],
+        );
+        let (db, table) = MysqlSink::split_db_table(&meta);
+        let mut delete = Query::delete();
+        delete
+            .from_table((Alias::new(db), Alias::new(table)))
+            .and_where(Expr::col("id").eq(7));
+
+        assert_eq!(
+            delete.to_string(MysqlQueryBuilder),
+            "DELETE FROM `sedp_biz_test`.`sedp_gsms_carrier_channel` WHERE `id` = 7"
+        );
     }
 
     #[test]
