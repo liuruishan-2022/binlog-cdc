@@ -101,12 +101,18 @@ impl MysqlSink {
             })
             .unzip();
 
-        let update_columns = meta
+        let mut update_columns = meta
             .columns
             .iter()
             .filter(|ele| !ele.is_primary())
             .map(|ele| Alias::new(ele.column_name()))
             .collect::<Vec<Alias>>();
+
+        if update_columns.is_empty() {
+            if let Some(primary_key) = meta.primary_keys().first() {
+                update_columns.push(Alias::new(primary_key));
+            }
+        }
 
         let on_conflict = OnConflict::new().update_columns(update_columns).to_owned();
 
@@ -315,12 +321,18 @@ mod tests {
                 (Alias::new(column.column_name()), value)
             })
             .unzip();
-        let update_columns = meta
+        let mut update_columns = meta
             .columns
             .iter()
             .filter(|column| !column.is_primary())
             .map(|column| Alias::new(column.column_name()))
             .collect::<Vec<_>>();
+
+        if update_columns.is_empty() {
+            if let Some(primary_key) = meta.primary_keys().first() {
+                update_columns.push(Alias::new(primary_key));
+            }
+        }
 
         Query::insert()
             .into_table(Alias::new(meta.table()))
