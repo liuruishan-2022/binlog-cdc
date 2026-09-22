@@ -387,19 +387,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "binlog-file-rs"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "mysql-binlog-connector-rust",
- "tikv-jemallocator",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bitflags"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
