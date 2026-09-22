@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::intrinsics::black_box;
 
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
@@ -71,7 +72,7 @@ impl MysqlSink {
         let delete = delete.from_table(meta.table().to_string());
         for ele in meta.primary_keys() {
             if let Some(value) = debezium.before_column(ele) {
-                delete.and_where(Expr::col(ele.to_string()).eq(value.to_string()));
+                delete.and_where(Expr::col(ele.to_string()).eq(Self::convert_expr(value)));
             }
         }
 
@@ -96,7 +97,7 @@ impl MysqlSink {
             .map(|ele| {
                 let value = debezium
                     .after_column(ele.column_name())
-                    .map_or(Expr::null(), |v| Expr::val(v.clone()));
+                    .map_or(Expr::null(), |v| Self::convert_expr(v));
                 (Alias::new(ele.column_name()), value)
             })
             .unzip();
@@ -126,6 +127,27 @@ impl MysqlSink {
                 meta.table()
             ),
             Err(err) => warn!("mysql delete error:{:?} table:{}", err, meta.table()),
+        }
+    }
+
+    fn convert_expr(value: &serde_json::Value) -> Expr {
+        match value {
+            serde_json::Value::Null => Expr::null(),
+            serde_json::Value::Bool(bool) => Expr::val(bool),
+            serde_json::Value::String(str) => Expr::val(str),
+            serde_json::Value::Number(number) => {
+                if let Some(value) = number.as_i64() {
+                    return Expr::val(value);
+                }
+                if let Some(value) = number.as_u64() {
+                    return Expr::val(value);
+                }
+                if let Some(value) = number.as_f64() {
+                    return Expr::val(value);
+                }
+                return Expr::val(number.to_string());
+            }
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => Expr::val(value.clone()),
         }
     }
 
@@ -290,7 +312,7 @@ mod tests {
             .map(|column| {
                 let value = record
                     .after_column(column.column_name())
-                    .map_or(Expr::null(), |value| Expr::val(value.clone()));
+                    .map_or(Expr::null(), |value| MysqlSink::convert_expr(value));
                 (Alias::new(column.column_name()), value)
             })
             .unzip();
