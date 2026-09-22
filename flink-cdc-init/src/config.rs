@@ -392,7 +392,7 @@ mod tests {
   hostname: 127.0.0.1
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: 'app_db.test_[0-9]+,app_db.orders'
   server-time-zone: Asia/Shanghai
   server-id: 5710-5716
@@ -429,7 +429,7 @@ verify:
   hostname: 127.0.0.1
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: 'app_db.orders'
 sink:
   type: file

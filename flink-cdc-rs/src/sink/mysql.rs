@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn qualifies_database_and_table_separately_for_upsert() {
         let meta = TableMeta::new(
-            "sedp_biz_test.sedp_gsms_carrier_channel".to_owned(),
+            "test_db.users".to_owned(),
             vec![
                 column("id", "bigint", true),
                 column("name", "varchar(64)", false),
@@ -367,14 +367,14 @@ mod tests {
 
         assert_eq!(
             sql(&meta, &record),
-            "INSERT INTO `sedp_biz_test`.`sedp_gsms_carrier_channel` (`id`, `name`) VALUES (7, 'channel-a') ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)"
+            "INSERT INTO `test_db`.`users` (`id`, `name`) VALUES (7, 'channel-a') ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)"
         );
     }
 
     #[test]
     fn qualifies_database_and_table_separately_for_delete() {
         let meta = TableMeta::new(
-            "sedp_biz_test.sedp_gsms_carrier_channel".to_owned(),
+            "test_db.users".to_owned(),
             vec![column("id", "bigint", true)],
         );
         let (db, table) = MysqlSink::split_db_table(&meta);
@@ -385,7 +385,7 @@ mod tests {
 
         assert_eq!(
             delete.to_string(MysqlQueryBuilder),
-            "DELETE FROM `sedp_biz_test`.`sedp_gsms_carrier_channel` WHERE `id` = 7"
+            "DELETE FROM `test_db`.`users` WHERE `id` = 7"
         );
     }
 

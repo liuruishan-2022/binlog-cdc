@@ -67,7 +67,7 @@ source:
 sink:
   type: kafka
   name: kafka-sink
-  properties.bootstrap.servers: 10.0.0.1:9092,10.0.0.2:9092
+  properties.bootstrap.servers: kafka-1:9092,kafka-2:9092
   properties.compression.type: lz4
   topic: my-topic                    # topic 需预先存在
 pipeline:
@@ -100,10 +100,7 @@ pipeline:
 | 换 tikv-jemallocator | **~1.6 万行/s(+50%)** | 分配开销降至 13% |
 | 多 channel 并行消费 | 整体 6x | 18 分钟 → 3 分钟完成同等回放 |
 
-**生产运行状态**(dev 集群,zadig 命名空间,Grafana/Prometheus 采集):
-- 实例 `flink-cdc-rs-mysql131-to-kafka` 持续运行,`up=1`
-- 6 个 channel `usage_percent` 长期为 0 —— sink 消费完全跟得上,零积压
-- CDC 延迟秒级(binlog 事件时间戳与当前时间差 < 15s)
+**运行表现**: Prometheus 指标可用于确认实例存活、通道积压和 CDC 延迟。
 
 **已知瓶颈与优化方向**:sink 当前逐条 produce 并等待 broker ack(实测单次 ~46ms),吞吐上限受 RTT 约束;`flink_sink_kafka_batch_size` 与 `produce_duration_seconds` 两个指标可量化改进收益,攒批发送是下一步优化项(预期 5-20x)。
 

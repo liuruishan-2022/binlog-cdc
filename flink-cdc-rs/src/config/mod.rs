@@ -76,7 +76,7 @@ mod tests {
   hostname: localhost
   port: 3306
   username: flink-cdc
-  password: flink-cdc@120
+  password: change-me
   tables: flink_cdc.*
   server-id: 5400-5404
   server-time-zone: UTC
@@ -87,7 +87,7 @@ mod tests {
 sink:
   type: kafka
   name: Kafka
-  properties.bootstrap.servers: 172.16.1.118:9092
+  properties.bootstrap.servers: kafka:9092
   properties.compression.type: lz4
   topic: kafka-default-press"#;
         let config: CdcConfig = serde_yaml::from_str(yaml_str).unwrap();
@@ -107,7 +107,7 @@ sink:
                 "5400-5404",
                 "specific-offset",
             )),
-            sink: sink::Sink::Kafka(Kafka::new("Kafka", "172.16.1.118:9092")),
+            sink: sink::Sink::Kafka(Kafka::new("Kafka", "kafka:9092")),
             route: None,
             pipeline: None,
         };

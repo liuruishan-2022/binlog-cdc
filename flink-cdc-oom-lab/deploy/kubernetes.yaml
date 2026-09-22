@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: flink-cdc-oom-lab
-  namespace: zadig
+  namespace: default
   labels:
     app: flink-cdc-oom-lab
 spec:
@@ -16,12 +16,10 @@ spec:
         app: flink-cdc-oom-lab
         application: flink-cdc-oom-lab
     spec:
-      imagePullSecrets:
-        - name: flink-cdc-oom-lab-harbor
       terminationGracePeriodSeconds: 5
       containers:
         - name: workload
-          image: xwharbor.wxchina.com/cpaas-test/flink-cdc-oom-lab:v0.1.0-20260901
+          image: ghcr.io/example/binlog-cdc-oom-lab:latest
           imagePullPolicy: Always
           command: ["/bin/bash", "-ec"]
           args:
@@ -29,7 +27,7 @@ spec:
               exec /opt/flink-cdc-oom-lab                 --mode="${LAB_MODE}"                 --payload="${LAB_PAYLOAD}"                 --queue="${LAB_QUEUE}"                 --warmup-rate="${WARMUP_RATE}"                 --warmup-seconds="${WARMUP_SECONDS}"                 --peak-rate="${PEAK_RATE}"                 --peak-seconds="${PEAK_SECONDS}"                 --burst-rate="${BURST_RATE}"                 --burst-seconds="${BURST_SECONDS}"                 --recovery-rate="${RECOVERY_RATE}"                 --recovery-seconds="${RECOVERY_SECONDS}"                 --settle-seconds="${SETTLE_SECONDS}"
           env: &lab-env
             - name: KAFKA_BROKERS
-              value: "172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092"
+              value: "kafka:9092"
             - name: KAFKA_TOPIC
               value: "kafka-press"
             - name: LAB_MODE
@@ -73,7 +71,7 @@ spec:
               cpu: "4"
               memory: "512Mi"
         - name: fault-injector
-          image: xwharbor.wxchina.com/cpaas-test/flink-cdc-oom-lab:v0.1.0-20260901
+          image: ghcr.io/example/binlog-cdc-oom-lab:latest
           imagePullPolicy: Always
           command: ["/bin/bash", "-ec", "sleep infinity"]
           env: *lab-env
@@ -92,7 +90,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: flink-cdc-oom-lab
-  namespace: zadig
+  namespace: default
   labels:
     app: flink-cdc-oom-lab
     application: flink-cdc-oom-lab

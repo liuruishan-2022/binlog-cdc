@@ -288,26 +288,26 @@ impl<'a> TableMetaHandler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// 测试不存在表的情况，查看异常信息
+    /// 需要显式提供测试数据库，不在源码中保存连接信息。
     #[tokio::test]
+    #[ignore = "requires FLINK_CDC_TEST_MYSQL_URL"]
     async fn test_desc_table_nonexistent_table() {
-        let url = "mysql://root:dsap2018@172.16.1.67:3306/mostest_gsms";
+        let url = std::env::var("FLINK_CDC_TEST_MYSQL_URL")
+            .expect("FLINK_CDC_TEST_MYSQL_URL is required");
+        let db_name =
+            std::env::var("FLINK_CDC_TEST_DATABASE").unwrap_or_else(|_| "test_db".to_string());
 
-        let table_schema = TableSchema::new(url)
+        let table_schema = TableSchema::new(&url)
             .await
             .expect("Failed to connect to database");
 
         let table_id = 999u64;
-        let db_name = "mostest_gsms";
         let table_name = "nonexistent_table_xyz";
+        let result = table_schema
+            .desc_table(table_id, &db_name, table_name)
+            .await;
 
-        // 执行 desc_table - 对于不存在的表，应该返回 None
-        let result = table_schema.desc_table(table_id, db_name, table_name).await;
-
-        // 验证返回 None（表不存在）
         assert!(result.is_none(), "Expected None for nonexistent table");
-        println!("Successfully handled nonexistent table, returned None as expected");
     }
 
     /// 测试 primary_index 方法

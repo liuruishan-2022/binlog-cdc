@@ -4,12 +4,12 @@ source:
 sink:
   type: kafka
   name: Kafka-sink
-  properties.bootstrap.servers: 172.16.1.135:9092,172.16.1.118:9092,172.16.1.149:9092
+  properties.bootstrap.servers: 127.0.0.1:9092
   properties.compression.type: lz4
   properties.max.request.size: 41943040
   properties.max.message.bytes: 41943040
-  topic: kafka-press
+  topic: cdc-events
 pipeline:
-  name: sync mos 67 mostest to kafka
+  name: console to kafka
   parallelism: 2
   channel.capacity: 10

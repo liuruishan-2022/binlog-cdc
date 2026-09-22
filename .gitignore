@@ -18,3 +18,13 @@ flink-cdc.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# Local secrets and environment-specific overrides
+.env
+.env.*
+*.local.yaml
+*.local.yml
+*secret*.yaml
+*secret*.yml
+*credentials*.yaml
+*credentials*.yml

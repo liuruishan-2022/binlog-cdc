@@ -477,7 +477,7 @@ source:
   hostname: localhost
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: app_db.\.*
   server-id: 5400-5404
   server-time-zone: UTC
@@ -509,7 +509,7 @@ source:
   hostname: localhost
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: app_db.\.*
   server-id: 5400-5404
   server-time-zone: UTC
@@ -539,7 +539,7 @@ source:
   hostname: localhost
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: app_db.\.*
   server-id: 5400-5404
   server-time-zone: UTC
@@ -561,10 +561,9 @@ pipeline:
 
     #[test]
     fn test_table_include() {
-        let includes = "
-information_schema.*,cpaas_mos.*,dify-test.*,dsap2.2.6.*,federated_link.*,hw2-msmp.*,mos2_gsms.*,mos6.2.1_list.*,mos_nacos1.4.*,mostest_gsms.*,mosxn_gsms.*,mosxn_list.*,mysql.*,nacos_sync.*,performance_schema.*,simulate.*,slow_query_log.*,srcp.*,stc.*,sys.*,temp_db.*,tmt_atest_cpaas.*,tmt_atest_mosgsms.*,tmt_atest_moslist.*,tmt_atest_nacos.*,tmt_atest_xxl_job.*,tmt_simulate.*,xxl_job_mos.*,xxl_job_xn.*,zhang.*,zxy_sms.*";
+        let includes = "information_schema.*,app_db.*,mysql.*,performance_schema.*,sys.*";
         let includes = TableInclude::create(includes);
-        assert!(includes.can_include("dsap2.2.6", "user"));
+        assert!(includes.can_include("app_db", "user"));
         assert!(includes.can_include("mysql", "user"));
     }
 
@@ -576,7 +575,7 @@ source:
   hostname: localhost
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: app_db.\.*
   server-id: 5400-5404
   server-time-zone: UTC
@@ -607,7 +606,7 @@ source:
   hostname: localhost
   port: 3306
   username: root
-  password: 123456
+  password: change-me
   tables: app_db.\.*
   server-id: 5400-5404
   server-time-zone: UTC

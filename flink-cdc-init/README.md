@@ -21,10 +21,10 @@
 cargo run -p flink-cdc-init -- --flink-cdc ./flink-cdc-init/mysql-to-kafka.yaml
 ```
 
-172.16.1.77 的 Kafka 初始化配置示例：
+Kafka 初始化配置示例：
 
 ```bash
-cargo run -p flink-cdc-init -- --flink-cdc ./flink-cdc-init/sedp-77-mysql-to-kafka.yaml
+cargo run -p flink-cdc-init -- --flink-cdc ./flink-cdc-init/mysql-to-kafka.yaml
 ```
 
 导出到文件示例：

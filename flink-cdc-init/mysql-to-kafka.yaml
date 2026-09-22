@@ -2,8 +2,8 @@ source:
   type: mysql
   hostname: 127.0.0.1
   port: 3306
-  username: root
-  password: 123456
+  username: cdc_user
+  password: change-me
   tables: 'app_db.orders_[0-9]+'
   server-time-zone: Asia/Shanghai
   server-id: 5710-5716
@@ -17,7 +17,7 @@ sink:
   properties.compression.type: lz4
   properties.max.request.size: 41943040
   properties.max.message.bytes: 41943040
-  topic: kafka-press
+  topic: cdc-events
 pipeline:
   name: sync mysql snapshot to kafka
   parallelism: 2
