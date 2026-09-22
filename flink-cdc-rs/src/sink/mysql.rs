@@ -172,7 +172,7 @@ impl MysqlSink {
                 self.process(data.data(), data.topic()).await;
             }
             _ => {
-                warn!("unknown type do data process");
+                warn!("unknown type do data process,we only support Kafka,Mysql...");
             }
         }
     }
