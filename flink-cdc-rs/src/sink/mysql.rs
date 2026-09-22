@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::intrinsics::black_box;
 
 use futures_util::TryStreamExt;
 use moka::sync::Cache;
